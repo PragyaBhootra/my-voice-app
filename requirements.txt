@@ -1,0 +1,8 @@
+gradio>=4.0
+openai>=1.0
+gtts>=2.0
+python-dotenv>=0.19
+sounddevice>=0.4.6
+scipy>=1.0
+fastapi
+uvicorn
