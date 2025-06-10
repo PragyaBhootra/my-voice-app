@@ -3,6 +3,7 @@ import gradio as gr
 from gtts import gTTS
 import tempfile
 import os
+from fastapi import FastAPI 
 
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))  # Use environment variable
 
