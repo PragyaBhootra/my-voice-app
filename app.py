@@ -45,7 +45,7 @@ interface = gr.Interface(
         gr.Textbox(label="📜 Transcribed Input"),
         gr.Textbox(label="🤖 GPT Reply")
     ],
-    title="🎙️ Permanent Voice Chat",
+    title="🎙️ Voice Chat",
     description="Speak and get AI replies! Powered by Whisper + GPT-4o + gTTS"
 )
 
