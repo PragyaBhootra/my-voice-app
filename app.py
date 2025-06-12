@@ -1,60 +1,102 @@
 from openai import OpenAI
 import gradio as gr
-from gtts import gTTS
 import tempfile
 import os
-from fastapi import FastAPI 
+import time
 
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))  # Use environment variable
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-def speech_to_speech(audio_path):
+# Custom VAD JavaScript for automatic recording control
+vad_script = """
+<script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.7/dist/bundle.min.js"></script>
+<script>
+async function initVAD() {
+    const myvad = await VAD.create();
+    const startButton = document.querySelector('.start-button');
+    const stopButton = document.querySelector('.stop-button');
+    
+    myvad.on('start', () => {
+        startButton.click();
+        stopButton.style.display = 'none';
+    });
+    
+    myvad.on('end', async () => {
+        stopButton.click();
+        startButton.style.display = 'none';
+        await new Promise(r => setTimeout(r, 1000));
+        myvad.start();
+    });
+    
+    myvad.start();
+}
+initVAD();
+</script>
+"""
+
+def transcribe_and_respond(audio_path, history=[]):
     try:
-        # Step 1: Transcribe user input using Whisper
-        with open(audio_path, "rb") as audio_file:
+        # Transcribe audio
+        with open(audio_path, "rb") as f:
             transcript = client.audio.transcriptions.create(
-                file=audio_file,
-                model="whisper-1"
+                file=f, model="whisper-1"
             )
         user_text = transcript.text
-
-        # Step 2: Generate a response using GPT-4o
+        
+        # Generate response
         response = client.chat.completions.create(
             model="gpt-4o",
-            messages=[
-                {"role": "system", "content": "You are a helpful voice assistant."},
-                {"role": "user", "content": user_text}
-            ]
+            messages=[{"role": "system", "content": "You're a helpful assistant. Keep responses under 2 sentences."}] 
+                      + history 
+                      + [{"role": "user", "content": user_text}]
         )
         reply = response.choices[0].message.content
-
-        # Step 3: Convert GPT reply to speech using OpenAI's TTS
-        speech_response = client.audio.speech.create(
-            model="tts-1",  # or tts-1-hd
-            voice="nova",   # or 'shimmer', 'echo', etc.
-            input=reply
+        
+        # Generate speech
+        speech = client.audio.speech.create(
+            model="tts-1", voice="nova", input=reply
         )
-
-        # Save the mp3 response
-        tts_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3").name
-        with open(tts_path, "wb") as f:
-            f.write(speech_response.read())
-
-        return tts_path, user_text, reply
-
+        
+        # Save response audio
+        response_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3").name
+        with open(response_path, "wb") as f:
+            f.write(speech.read())
+            
+        return response_path, history + [("", reply)]
+    
     except Exception as e:
-        return None, f"Error: {str(e)}", f"Error: {str(e)}"
+        print(f"Error: {str(e)}")
+        return None, history
 
-interface = gr.Interface(
-    fn=speech_to_speech,
-    inputs=gr.Audio(sources=["microphone"], type="filepath", label="🎤 Speak Here"),
-    outputs=[
-        gr.Audio(label="🔊 GPT Response"),
-        gr.Textbox(label="📜 Transcribed Input"),
-        gr.Textbox(label="🤖 GPT Reply")
-    ],
-    title="🎙️ Voice Chat",
-    description="Speak and get AI replies! Powered by Whisper + GPT-4o + gTTS"
+# Gradio interface with VAD integration
+with gr.Blocks(js=vad_script) as demo:
+    with gr.Row():
+        with gr.Column():
+            audio_input = gr.Audio(
+                sources=["microphone"],
+                type="filepath",
+                streaming=True,
+                show_label=False
+            )
+        with gr.Column():
+            response_audio = gr.Audio(
+                autoplay=True,
+                streaming=True,
+                show_label=False
+            )
+    
+    chat_history = gr.Chatbot(height=300)
+    state = gr.State([])
+    
+    audio_input.stream(
+        transcribe_and_respond,
+        [audio_input, state],
+        [response_audio, state],
+        show_progress="hidden"
+    )
+
+# For Render deployment
+app = gr.mount_gradio_app(
+    app=gr.routes.App(),
+    blocks=demo,
+    path="/"
 )
-
-app = FastAPI()
-app = gr.mount_gradio_app(app, interface, path="/")
