@@ -1,28 +1,37 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-  <title>IMI Voice Assistant</title>
-  <link rel="stylesheet" href="/static/style.css">
-  <script src="https://kit.fontawesome.com/a076d05399.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎤 Voice Assistant</title>
+    <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <div class="brand">IMI</div>
-  <div class="subtitle">Speak and let your voice control the future</div>
+    <div class="container">
+        <header>
+            <h1>🎙️ AI Voice Assistant</h1>
+            <p>Click start to begin conversation</p>
+        </header>
 
-  <div class="mic-container">
-    <div class="mic-button" id="micBtn">
-      <i class="fas fa-microphone"></i>
-      <canvas id="waveform"></canvas>
+        <div class="chat-container">
+            <div id="chatHistory" class="chat-history"></div>
+        </div>
+
+        <div class="controls">
+            <button id="startBtn" class="start-btn">
+                <span class="btn-text">🚀 Start Conversation</span>
+            </button>
+            <div id="status" class="status">Click start to begin</div>
+        </div>
+
+        <div class="audio-player">
+            <audio id="responseAudio" hidden></audio>
+        </div>
     </div>
-  </div>
 
-  <div id="status">Click microphone to start</div>
-  <audio id="audioPlayer" hidden></audio>
-
-  <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.22/dist/bundle.min.js"></script>
-  <script src="/static/script.js"></script>
+    <!-- VAD Library -->
+    <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.22/dist/bundle.min.js"></script>
+    <script src="/static/script.js"></script>
 </body>
 </html>
 
