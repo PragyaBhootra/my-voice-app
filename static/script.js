@@ -6,13 +6,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const responseAudio = document.getElementById('responseAudio');
   const chatHistory = document.getElementById('chatHistory');
 
-  // Initialize VAD and microphone stream
   async function initVAD() {
     try {
-      // Request microphone access explicitly
+      // Explicitly request microphone access
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-      vad = await VAD.MicVAD.new({
+      // Use window.VAD to ensure compatibility
+      vad = await window.VAD.MicVAD.new({
         stream: stream,
         onSpeechStart: () => {
           startBtn.classList.add('active');
@@ -38,7 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const audioBlob = new Blob([audioData], { type: 'audio/wav' });
 
-      // Append user message to chat
+      // Append user message to chat (optional, since no transcript yet)
       addMessage('You spoke (audio sent)', 'user');
 
       // Transcribe audio
@@ -75,6 +75,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const audioBlobResponse = await speakResponse.blob();
       const audioUrl = URL.createObjectURL(audioBlobResponse);
       responseAudio.src = audioUrl;
+      responseAudio.hidden = false;
       responseAudio.play();
 
       statusEl.textContent = "Ready - Start speaking!";
