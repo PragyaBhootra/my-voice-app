@@ -5,11 +5,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
 import tempfile
 import os
-from pydantic import BaseModel
 
 app = FastAPI()
 
-# CORS configuration
+# CORS for frontend-backend communication
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -32,36 +31,34 @@ async def serve_ui():
 @app.post("/process")
 async def process_audio(request: Request):
     try:
-        # Receive audio blob
         audio_data = await request.body()
-        
-        # Transcribe
+        # Save audio to temp file
         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
             f.write(audio_data)
-            transcript = client.audio.transcriptions.create(
-                file=open(f.name, "rb"), 
-                model="whisper-1"
-            )
-        
+            f.flush()
+            # Transcribe
+            with open(f.name, "rb") as audio_file:
+                transcript = client.audio.transcriptions.create(
+                    file=audio_file,
+                    model="whisper-1"
+                )
+        os.unlink(f.name)
         # Get GPT response
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": transcript.text}]
         )
         reply = response.choices[0].message.content
-        
         # Generate speech
         speech = client.audio.speech.create(
-            model="tts-1", 
-            voice="nova", 
+            model="tts-1",
+            voice="nova",
             input=reply
         )
-        
         return StreamingResponse(
             iter([speech.content]),
             media_type="audio/mpeg"
         )
-        
     except Exception as e:
         raise HTTPException(500, str(e))
 
