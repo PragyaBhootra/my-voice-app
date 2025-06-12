@@ -30,4 +30,20 @@ h1 {
     margin-bottom: 1rem;
     font-size: 1.05rem;
 }
+#startBtn {
+    display: block;
+    margin: 0 auto 1rem auto;
+    padding: 0.8rem 2rem;
+    font-size: 1.2rem;
+    background: #007bff;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+}
+#startBtn:disabled {
+    background: #aaa;
+    cursor: not-allowed;
+}
+
 
