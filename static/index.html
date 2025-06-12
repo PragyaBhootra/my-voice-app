@@ -1,73 +1,28 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>🎤 Real-Time Voice Assistant</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="/static/style.css">
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            background-color: #f5f6fa;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            margin: 0;
-        }
-        .container {
-            text-align: center;
-            background: white;
-            padding: 2rem;
-            border-radius: 12px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-            width: 100%;
-            max-width: 500px;
-        }
-        button {
-            padding: 0.7rem 2rem;
-            font-size: 1.1rem;
-            margin: 1rem 0;
-            border: none;
-            background-color: #007bff;
-            color: white;
-            border-radius: 8px;
-            cursor: pointer;
-        }
-        #status {
-            font-size: 1rem;
-            margin: 1rem 0;
-            color: #444;
-        }
-        #messages {
-            text-align: left;
-            max-height: 200px;
-            overflow-y: auto;
-            margin-top: 1rem;
-            border-top: 1px solid #ccc;
-            padding-top: 1rem;
-        }
-        audio {
-            margin-top: 1rem;
-            width: 100%;
-        }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>IMI Voice Assistant</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://kit.fontawesome.com/a076d05399.js"></script>
 </head>
 <body>
-    <div class="container">
-        <h1>🎤 Real-Time Voice Assistant</h1>
-        <button id="startBtn">Start</button>
-        <div id="status">Click Start to begin listening...</div>
-        <div id="messages"></div>
-        <audio id="player" hidden controls></audio>
+  <div class="brand">IMI</div>
+  <div class="subtitle">Speak and let your voice control the future</div>
+
+  <div class="mic-container">
+    <div class="mic-button" id="micBtn">
+      <i class="fas fa-microphone"></i>
+      <canvas id="waveform"></canvas>
     </div>
+  </div>
 
-    <!-- VAD and JS Libraries -->
-    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.14.0/dist/ort.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.22/dist/bundle.min.js"></script>
+  <div id="status">Click microphone to start</div>
+  <audio id="audioPlayer" hidden></audio>
 
-    <!-- Your script -->
-    <script src="/static/script.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.22/dist/bundle.min.js"></script>
+  <script src="/static/script.js"></script>
 </body>
 </html>
 
