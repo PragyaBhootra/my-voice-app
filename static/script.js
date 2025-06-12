@@ -1,103 +1,65 @@
-<script type="module">
-import VAD from "https://cdn.jsdelivr.net/npm/vad/dist/vad.min.js"; // adjust if self-hosted
-
-let vad, mediaRecorder, audioChunks = [];
-let isStarted = false;
-
+let vad;
+let isListening = false;
+const micBtn = document.getElementById('micBtn');
 const statusEl = document.getElementById('status');
-const messagesEl = document.getElementById('messages');
-const audioPlayer = document.getElementById('player');
-const startBtn = document.getElementById('startBtn');
+const audioPlayer = document.getElementById('audioPlayer');
 
-startBtn.onclick = async () => {
-    startBtn.disabled = true;
-    statusEl.textContent = "🔄 Requesting microphone permission...";
-
-    try {
-        // Get permission first
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        console.log("✅ Microphone access granted");
-
-        // Initialize VAD with that stream
-        vad = await VAD.MicVAD.new({
-            stream,
-            onSpeechStart: () => {
-                console.log("🎙️ Speech started");
-                statusEl.textContent = "🎤 Listening...";
-                startRecording();
-            },
-            onSpeechEnd: async (audio) => {
-                console.log("🛑 Speech ended");
-                statusEl.textContent = "⏳ Processing...";
-                await stopRecording();
-                await processAudio();
-            },
-            // Optional silence trigger timeout
-            debounceTime: 300,
-        });
-
-        await vad.start();
-        statusEl.textContent = "✅ Ready to listen. Start speaking!";
-        isStarted = true;
-    } catch (err) {
-        console.error("❌ Microphone/VAD initialization failed:", err);
-        statusEl.textContent = "❌ Microphone access denied or unavailable";
-        startBtn.disabled = false;
-    }
-};
-
-function startRecording() {
-    audioChunks = [];
-    mediaRecorder = new MediaRecorder(vad.stream);
-    mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
-    mediaRecorder.start();
+async function initVAD() {
+  try {
+    vad = await VAD.MicVAD.new({
+      onSpeechStart: () => {
+        micBtn.classList.add('active');
+        statusEl.textContent = "Listening...";
+      },
+      onSpeechEnd: async (audio) => {
+        micBtn.classList.remove('active');
+        statusEl.textContent = "Processing...";
+        await processAudio(audio);
+      }
+    });
+    statusEl.textContent = "Ready - Start speaking!";
+  } catch (error) {
+    statusEl.textContent = "Microphone access required";
+    console.error('VAD init error:', error);
+  }
 }
 
-async function stopRecording() {
-    if (mediaRecorder && mediaRecorder.state !== "inactive") {
-        await new Promise(resolve => {
-            mediaRecorder.onstop = resolve;
-            mediaRecorder.stop();
-        });
-    }
+async function processAudio(audioData) {
+  try {
+    const audioBlob = new Blob([audioData], { type: 'audio/wav' });
+    
+    const response = await fetch('/process', {
+      method: 'POST',
+      body: audioBlob
+    });
+
+    if (!response.ok) throw new Error('Server error');
+    
+    const audioUrl = URL.createObjectURL(await response.blob());
+    audioPlayer.src = audioUrl;
+    audioPlayer.hidden = false;
+    await audioPlayer.play();
+    
+    statusEl.textContent = "Ready - Start speaking!";
+  } catch (error) {
+    statusEl.textContent = "Error processing request";
+    console.error('Processing error:', error);
+  }
 }
 
-async function processAudio() {
-    const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
-    addMessage("⏳ Processing your speech...", "user");
+micBtn.addEventListener('click', async () => {
+  if (!isListening) {
+    isListening = true;
+    statusEl.textContent = "Initializing...";
+    await initVAD();
+    if (vad) vad.start();
+  } else {
+    isListening = false;
+    if (vad) vad.stop();
+    statusEl.textContent = "Click microphone to start";
+  }
+});
 
-    try {
-        const response = await fetch('/process', {
-            method: 'POST',
-            body: audioBlob
-        });
-
-        if (!response.ok) throw new Error('Server error');
-
-        const audioData = await response.blob();
-        const audioUrl = URL.createObjectURL(audioData);
-        audioPlayer.src = audioUrl;
-        audioPlayer.hidden = false;
-        audioPlayer.play();
-
-        addMessage("✅ Response ready. Playing audio...", "ai");
-        statusEl.textContent = "🎤 Ready to listen.";
-    } catch (err) {
-        console.error("❌ Audio processing failed:", err);
-        statusEl.textContent = "❌ Error processing audio";
-        addMessage("❌ Error: " + err.message, "ai");
-    }
-}
-
-function addMessage(text, sender) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    div.style.margin = "0.5rem 0";
-    div.style.color = sender === "user" ? "#007bff" : "#28a745";
-    messagesEl.appendChild(div);
-    messagesEl.scrollTop = messagesEl.scrollHeight;
-}
-</script>
 
 
 
