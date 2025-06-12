@@ -1,35 +1,20 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🎤 Voice Assistant</title>
+    <title>Auto Voice Assistant</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
     <div class="container">
-        <header>
-            <h1>🎙️ AI Voice Assistant</h1>
-            <p>Click and hold to speak, release to send</p>
-        </header>
-
-        <div class="chat-container">
-            <div id="chatHistory" class="chat-history"></div>
-        </div>
-
-        <div class="controls">
-            <button id="recordBtn" class="record-btn">
-                <span class="btn-text">🎤 Hold to Speak</span>
-                <div class="pulse-ring"></div>
-            </button>
-            <div id="status" class="status">Ready to listen...</div>
-        </div>
-
-        <div class="audio-player">
-            <audio id="responseAudio" controls style="display: none;"></audio>
-        </div>
+        <h1>🎙️ Real-Time Voice Assistant</h1>
+        <div id="status">Ready to listen...</div>
+        <div id="messages"></div>
+        <audio id="player" hidden></audio>
     </div>
-
+    
+    <!-- VAD Library -->
+    <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.22/dist/bundle.min.js"></script>
     <script src="/static/script.js"></script>
 </body>
 </html>
+
