@@ -7,10 +7,12 @@
 <body>
     <div class="container">
         <h1>🎤 Real-Time Voice Assistant</h1>
-        <div id="status">Ready to listen...</div>
+        <button id="startBtn">Start</button>
+        <div id="status">Click Start to begin listening...</div>
         <div id="messages"></div>
         <audio id="player" hidden></audio>
     </div>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.14.0/dist/ort.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.22/dist/bundle.min.js"></script>
     <script src="/static/script.js"></script>
 </body>
