@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎤 Voice Assistant</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎙️ AI Voice Assistant</h1>
+            <p>Click and hold to speak, release to send</p>
+        </header>
+
+        <div class="chat-container">
+            <div id="chatHistory" class="chat-history"></div>
+        </div>
+
+        <div class="controls">
+            <button id="recordBtn" class="record-btn">
+                <span class="btn-text">🎤 Hold to Speak</span>
+                <div class="pulse-ring"></div>
+            </button>
+            <div id="status" class="status">Ready to listen...</div>
+        </div>
+
+        <div class="audio-player">
+            <audio id="responseAudio" controls style="display: none;"></audio>
+        </div>
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
