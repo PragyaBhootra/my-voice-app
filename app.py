@@ -9,7 +9,7 @@ client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))  # Use environment var
 
 def speech_to_speech(audio_path):
     try:
-        # Transcribe with Whisper
+        # Step 1: Transcribe user input using Whisper
         with open(audio_path, "rb") as audio_file:
             transcript = client.audio.transcriptions.create(
                 file=audio_file,
@@ -17,7 +17,7 @@ def speech_to_speech(audio_path):
             )
         user_text = transcript.text
 
-        # Generate GPT response
+        # Step 2: Generate a response using GPT-4o
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=[
@@ -27,10 +27,17 @@ def speech_to_speech(audio_path):
         )
         reply = response.choices[0].message.content
 
-        # Convert to speech
-        tts = gTTS(reply)
+        # Step 3: Convert GPT reply to speech using OpenAI's TTS
+        speech_response = client.audio.speech.create(
+            model="tts-1",  # or tts-1-hd
+            voice="nova",   # or 'shimmer', 'echo', etc.
+            input=reply
+        )
+
+        # Save the mp3 response
         tts_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3").name
-        tts.save(tts_path)
+        with open(tts_path, "wb") as f:
+            f.write(speech_response.read())
 
         return tts_path, user_text, reply
 
