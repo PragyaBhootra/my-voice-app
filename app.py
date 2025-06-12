@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 app = FastAPI()
 
-# CORS middleware for frontend-backend communication
+# CORS configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -18,78 +18,56 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount static files
+# Serve static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # OpenAI client
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-class ChatRequest(BaseModel):
-    message: str
-
 @app.get("/", response_class=HTMLResponse)
-async def get_home():
-    with open("static/index.html", "r") as f:
+async def serve_ui():
+    with open("static/index.html") as f:
         return HTMLResponse(f.read())
 
-@app.post("/transcribe")
-async def transcribe_audio(request: Request):
+@app.post("/process")
+async def process_audio(request: Request):
     try:
+        # Receive audio blob
         audio_data = await request.body()
         
-        # Save audio to temporary file
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
-            tmp_file.write(audio_data)
-            tmp_file.flush()
-            
-            # Transcribe with OpenAI Whisper
-            with open(tmp_file.name, "rb") as audio_file:
-                transcript = client.audio.transcriptions.create(
-                    file=audio_file,
-                    model="whisper-1"
-                )
+        # Transcribe
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
+            f.write(audio_data)
+            transcript = client.audio.transcriptions.create(
+                file=open(f.name, "rb"), 
+                model="whisper-1"
+            )
         
-        os.unlink(tmp_file.name)
-        return {"transcription": transcript.text}
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/chat")
-async def chat_with_gpt(request: ChatRequest):
-    try:
+        # Get GPT response
         response = client.chat.completions.create(
             model="gpt-4o",
-            messages=[
-                {"role": "system", "content": "You are a helpful voice assistant. Keep responses concise."},
-                {"role": "user", "content": request.message}
-            ]
+            messages=[{"role": "user", "content": transcript.text}]
         )
-        return {"response": response.choices[0].message.content}
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/speak")
-async def text_to_speech(request: ChatRequest):
-    try:
-        speech_response = client.audio.speech.create(
-            model="tts-1",
-            voice="nova",
-            input=request.message
+        reply = response.choices[0].message.content
+        
+        # Generate speech
+        speech = client.audio.speech.create(
+            model="tts-1", 
+            voice="nova", 
+            input=reply
         )
         
         return StreamingResponse(
-            iter([speech_response.content]),
-            media_type="audio/mpeg",
-            headers={"Content-Disposition": "attachment; filename=speech.mp3"}
+            iter([speech.content]),
+            media_type="audio/mpeg"
         )
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
         
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
 
