@@ -1,3 +1,6 @@
+<script type="module">
+import VAD from "https://cdn.jsdelivr.net/npm/vad/dist/vad.min.js"; // adjust if self-hosted
+
 let vad, mediaRecorder, audioChunks = [];
 let isStarted = false;
 
@@ -8,24 +11,36 @@ const startBtn = document.getElementById('startBtn');
 
 startBtn.onclick = async () => {
     startBtn.disabled = true;
-    statusEl.textContent = "Initializing microphone and VAD...";
+    statusEl.textContent = "🔄 Requesting microphone permission...";
+
     try {
-        await navigator.mediaDevices.getUserMedia({ audio: true }); // Prompt permission early
+        // Get permission first
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        console.log("✅ Microphone access granted");
+
+        // Initialize VAD with that stream
         vad = await VAD.MicVAD.new({
+            stream,
             onSpeechStart: () => {
+                console.log("🎙️ Speech started");
                 statusEl.textContent = "🎤 Listening...";
                 startRecording();
             },
             onSpeechEnd: async (audio) => {
+                console.log("🛑 Speech ended");
                 statusEl.textContent = "⏳ Processing...";
                 await stopRecording();
                 await processAudio();
-            }
+            },
+            // Optional silence trigger timeout
+            debounceTime: 300,
         });
+
         await vad.start();
-        statusEl.textContent = "Ready to listen. Start speaking!";
+        statusEl.textContent = "✅ Ready to listen. Start speaking!";
         isStarted = true;
     } catch (err) {
+        console.error("❌ Microphone/VAD initialization failed:", err);
         statusEl.textContent = "❌ Microphone access denied or unavailable";
         startBtn.disabled = false;
     }
@@ -50,19 +65,25 @@ async function stopRecording() {
 async function processAudio() {
     const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
     addMessage("⏳ Processing your speech...", "user");
+
     try {
         const response = await fetch('/process', {
             method: 'POST',
             body: audioBlob
         });
+
         if (!response.ok) throw new Error('Server error');
-        const audioUrl = URL.createObjectURL(await response.blob());
+
+        const audioData = await response.blob();
+        const audioUrl = URL.createObjectURL(audioData);
         audioPlayer.src = audioUrl;
         audioPlayer.hidden = false;
         audioPlayer.play();
+
         addMessage("✅ Response ready. Playing audio...", "ai");
-        statusEl.textContent = "Ready to listen. Start speaking!";
+        statusEl.textContent = "🎤 Ready to listen.";
     } catch (err) {
+        console.error("❌ Audio processing failed:", err);
         statusEl.textContent = "❌ Error processing audio";
         addMessage("❌ Error: " + err.message, "ai");
     }
@@ -76,6 +97,8 @@ function addMessage(text, sender) {
     messagesEl.appendChild(div);
     messagesEl.scrollTop = messagesEl.scrollHeight;
 }
+</script>
+
 
 
 
