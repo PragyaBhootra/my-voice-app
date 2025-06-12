@@ -7,7 +7,7 @@
 html, body {
   height: 100%;
   width: 100%;
-  font-family: 'Segoe UI', sans-serif;
+  font-family: 'Segoe UI', Arial, sans-serif;
   background: #0d0d1a;
   color: white;
 }
@@ -21,100 +21,139 @@ body {
   min-height: 100vh;
 }
 
-.brand {
-  font-size: clamp(32px, 9vw, 64px);
-  font-weight: bold;
+.container {
+  max-width: 600px;
+  width: 100%;
+  margin: 40px auto;
+  background: #181828;
+  border-radius: 16px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.12);
+  padding: 2rem 1rem 1.5rem 1rem;
+}
+
+header {
+  text-align: center;
+  margin-bottom: 1.5rem;
+}
+
+header h1 {
+  font-size: 2.2rem;
+  margin-bottom: 0.5rem;
   background: linear-gradient(to right, #ff00ff, #00ffff);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
-  text-align: center;
-  margin-top: 20px;
 }
 
-.subtitle {
-  font-size: clamp(14px, 4.5vw, 24px);
+header p {
   color: #bbb;
-  margin-top: 10px;
-  margin-bottom: 30px;
-  text-align: center;
-  padding: 0 10px;
+  font-size: 1rem;
 }
 
-.mic-container {
-  position: relative;
-  z-index: 2;
+.chat-container {
+  height: 280px;
+  overflow-y: auto;
+  background: #202040;
+  border-radius: 10px;
+  padding: 1rem;
+  margin-bottom: 1.5rem;
+  border: 2px solid #23234a;
+}
+
+.chat-history {
   display: flex;
-  justify-content: center;
-  align-items: center;
-  margin-bottom: 40px;
+  flex-direction: column;
+  gap: 1rem;
 }
 
-.mic-button {
-  width: 90px;
-  height: 90px;
-  border-radius: 50%;
-  background: radial-gradient(circle at center, #ff00ff, #6e00ff);
-  box-shadow: 0 0 25px #ff00ffaa;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: transform 0.2s ease;
-  position: relative;
-  overflow: hidden;
+.message {
+  max-width: 80%;
+  padding: 0.8rem 1rem;
+  border-radius: 10px;
+  word-wrap: break-word;
+  font-size: 1.05rem;
 }
 
-.mic-button.active {
-  box-shadow: 0 0 35px #00ffffaa;
-  animation: pulse 1.5s infinite;
-}
-
-@keyframes pulse {
-  0% { transform: scale(1); }
-  50% { transform: scale(1.1); }
-  100% { transform: scale(1); }
-}
-
-.mic-button i {
-  font-size: 36px;
+.user-message {
+  background: #007bff;
   color: white;
-  z-index: 2;
+  align-self: flex-end;
+  border-bottom-right-radius: 5px;
 }
 
-.mic-button canvas {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 90px;
-  height: 90px;
-  pointer-events: none;
-  z-index: 1;
+.ai-message {
+  background: #28a745;
+  color: white;
+  align-self: flex-start;
+  border-bottom-left-radius: 5px;
 }
 
-#status {
-  font-size: 1.2rem;
-  color: #00ffff;
+.controls {
   text-align: center;
-  margin-top: 20px;
+  margin-bottom: 1.5rem;
+}
+
+.start-btn {
+  background: linear-gradient(to right, #ff00ff, #00ffff);
+  color: white;
+  border: none;
+  border-radius: 30px;
+  padding: 0.9rem 2.2rem;
+  font-size: 1.2rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0,255,255,0.18);
+  transition: background 0.3s, transform 0.2s;
+  margin-bottom: 1rem;
+}
+
+.start-btn:active,
+.start-btn.active {
+  background: linear-gradient(to right, #00ffff, #ff00ff);
+  transform: scale(1.05);
+}
+
+.status {
+  margin-top: 0.5rem;
+  font-size: 1.1rem;
+  color: #00ffff;
+}
+
+.audio-player {
+  text-align: center;
+  margin-top: 1rem;
 }
 
 audio {
+  width: 100%;
+  outline: none;
+  border-radius: 8px;
+  margin-top: 0.5rem;
   display: none;
 }
 
+.error {
+  background: #ff4757;
+  color: white;
+  padding: 1rem;
+  border-radius: 10px;
+  margin: 1rem 0;
+  text-align: center;
+}
+
 @media (max-width: 600px) {
-  .mic-button {
-    width: 70px;
-    height: 70px;
+  .container {
+    padding: 1rem 0.3rem 1rem 0.3rem;
   }
-  .mic-button i {
-    font-size: 28px;
+  .chat-container {
+    height: 180px;
+    padding: 0.7rem;
   }
-  .mic-button canvas {
-    width: 70px;
-    height: 70px;
+  .start-btn {
+    padding: 0.7rem 1.5rem;
+    font-size: 1rem;
   }
 }
+
 
 
 
