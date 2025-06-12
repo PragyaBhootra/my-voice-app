@@ -1,102 +1,90 @@
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
-import gradio as gr
 import tempfile
 import os
-import time
+from pydantic import BaseModel
 
+app = FastAPI()
+
+# CORS middleware for frontend-backend communication
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Mount static files
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# OpenAI client
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-# Custom VAD JavaScript for automatic recording control
-vad_script = """
-<script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.7/dist/bundle.min.js"></script>
-<script>
-async function initVAD() {
-    const myvad = await VAD.create();
-    const startButton = document.querySelector('.start-button');
-    const stopButton = document.querySelector('.stop-button');
-    
-    myvad.on('start', () => {
-        startButton.click();
-        stopButton.style.display = 'none';
-    });
-    
-    myvad.on('end', async () => {
-        stopButton.click();
-        startButton.style.display = 'none';
-        await new Promise(r => setTimeout(r, 1000));
-        myvad.start();
-    });
-    
-    myvad.start();
-}
-initVAD();
-</script>
-"""
+class ChatRequest(BaseModel):
+    message: str
 
-def transcribe_and_respond(audio_path, history=[]):
+@app.get("/", response_class=HTMLResponse)
+async def get_home():
+    with open("static/index.html", "r") as f:
+        return HTMLResponse(f.read())
+
+@app.post("/transcribe")
+async def transcribe_audio(request: Request):
     try:
-        # Transcribe audio
-        with open(audio_path, "rb") as f:
-            transcript = client.audio.transcriptions.create(
-                file=f, model="whisper-1"
-            )
-        user_text = transcript.text
+        audio_data = await request.body()
         
-        # Generate response
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "system", "content": "You're a helpful assistant. Keep responses under 2 sentences."}] 
-                      + history 
-                      + [{"role": "user", "content": user_text}]
-        )
-        reply = response.choices[0].message.content
-        
-        # Generate speech
-        speech = client.audio.speech.create(
-            model="tts-1", voice="nova", input=reply
-        )
-        
-        # Save response audio
-        response_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3").name
-        with open(response_path, "wb") as f:
-            f.write(speech.read())
+        # Save audio to temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
+            tmp_file.write(audio_data)
+            tmp_file.flush()
             
-        return response_path, history + [("", reply)]
+            # Transcribe with OpenAI Whisper
+            with open(tmp_file.name, "rb") as audio_file:
+                transcript = client.audio.transcriptions.create(
+                    file=audio_file,
+                    model="whisper-1"
+                )
+        
+        os.unlink(tmp_file.name)
+        return {"transcription": transcript.text}
     
     except Exception as e:
-        print(f"Error: {str(e)}")
-        return None, history
+        raise HTTPException(status_code=500, detail=str(e))
 
-# Gradio interface with VAD integration
-with gr.Blocks(js=vad_script) as demo:
-    with gr.Row():
-        with gr.Column():
-            audio_input = gr.Audio(
-                sources=["microphone"],
-                type="filepath",
-                streaming=True,
-                show_label=False
-            )
-        with gr.Column():
-            response_audio = gr.Audio(
-                autoplay=True,
-                streaming=True,
-                show_label=False
-            )
+@app.post("/chat")
+async def chat_with_gpt(request: ChatRequest):
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "You are a helpful voice assistant. Keep responses concise."},
+                {"role": "user", "content": request.message}
+            ]
+        )
+        return {"response": response.choices[0].message.content}
     
-    chat_history = gr.Chatbot(height=300)
-    state = gr.State([])
-    
-    audio_input.stream(
-        transcribe_and_respond,
-        [audio_input, state],
-        [response_audio, state],
-        show_progress="hidden"
-    )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-# For Render deployment
-app = gr.mount_gradio_app(
-    app=gr.routes.App(),
-    blocks=demo,
-    path="/"
-)
+@app.post("/speak")
+async def text_to_speech(request: ChatRequest):
+    try:
+        speech_response = client.audio.speech.create(
+            model="tts-1",
+            voice="nova",
+            input=request.message
+        )
+        
+        return StreamingResponse(
+            iter([speech_response.content]),
+            media_type="audio/mpeg",
+            headers={"Content-Disposition": "attachment; filename=speech.mp3"}
+        )
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
