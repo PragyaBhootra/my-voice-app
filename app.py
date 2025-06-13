@@ -94,8 +94,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 "modalities": ["text", "audio"],
                 "instructions": "You are a helpful AI assistant. Keep responses conversational and concise.",
                 "voice": "alloy",
-                "input_audio_format": "pcm_s16le_16000",
-                "output_audio_format": "pcm_s16le_16000",
+                "input_audio_format": "pcm16",
+                "output_audio_format": "pcm16",
                 "input_audio_transcription": {
                     "model": "whisper-1"
                 },
