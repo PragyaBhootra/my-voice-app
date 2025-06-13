@@ -1,20 +1,17 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-import asyncio
-import json
+from openai import OpenAI
+import tempfile
 import os
+import json
 import base64
-import websockets
-import logging
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+import asyncio
 
 app = FastAPI()
 
+# CORS middleware for frontend-backend communication
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -23,160 +20,84 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# OpenAI client
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 @app.get("/", response_class=HTMLResponse)
 async def get_home():
     with open("static/index.html", "r") as f:
         return HTMLResponse(f.read())
 
-class RealtimeClient:
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-        self.websocket = None
-        self.url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2025-06-03"
-        self.headers = {
-            "Authorization": f"Bearer {api_key}",
-            "OpenAI-Beta": "realtime=v1"
-        }
-
-    async def connect(self):
-        """Connect to OpenAI Realtime API"""
-        try:
-            self.websocket = await websockets.connect(
-                self.url,
-                additional_headers=self.headers
-            )
-            logger.info("Connected to OpenAI Realtime API")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to connect to OpenAI: {e}")
-            return False
-
-    async def send_event(self, event):
-        """Send event to OpenAI"""
-        if self.websocket:
-            await self.websocket.send(json.dumps(event))
-
-    async def receive_event(self):
-        """Receive event from OpenAI"""
-        if self.websocket:
-            try:
-                message = await self.websocket.recv()
-                return json.loads(message)
-            except websockets.exceptions.ConnectionClosed:
-                logger.info("OpenAI connection closed")
-                return None
-        return None
-
-    async def close(self):
-        """Close connection"""
-        if self.websocket:
-            await self.websocket.close()
-
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
-    
-    # Initialize OpenAI Realtime client
-    openai_client = RealtimeClient(os.environ.get("OPENAI_API_KEY"))
-    
     try:
-        # Connect to OpenAI
-        if not await openai_client.connect():
-            await websocket.send_json({"type": "error", "message": "Failed to connect to OpenAI"})
-            return
+        buffer = bytearray()
 
-        # Configure session
-        session_config = {
-            "type": "session.update",
-            "session": {
-                "modalities": ["text", "audio"],
-                "instructions": "You are a helpful AI assistant. Keep responses conversational and concise.",
-                "voice": "alloy",
-                "input_audio_format": "pcm16",
-                "output_audio_format": "pcm16",
-                "input_audio_transcription": {
-                    "model": "whisper-1"
-                },
-                "turn_detection": {
-                    "type": "server_vad",
-                    "threshold": 0.5,
-                    "prefix_padding_ms": 300,
-                    "silence_duration_ms": 500
-                }
-            }
-        }
-        await openai_client.send_event(session_config)
+        while True:
+            data = await websocket.receive_text()
+            event = json.loads(data)
 
-        # Handle concurrent message processing
-        async def handle_openai_messages():
-            """Forward OpenAI messages to client"""
-            while True:
-                try:
-                    openai_event = await openai_client.receive_event()
-                    if openai_event is None:
-                        break
-                    await websocket.send_json(openai_event)
-                except Exception as e:
-                    logger.error(f"Error handling OpenAI message: {e}")
-                    break
+            if event["type"] == "audio_data":
+                audio_chunk = base64.b64decode(event["audio"])
+                buffer.extend(audio_chunk)
 
-        async def handle_client_messages():
-            """Forward client messages to OpenAI"""
-            while True:
-                try:
-                    client_message = await websocket.receive_json()
-                    
-                    if client_message["type"] == "audio_data":
-                        # Convert client audio to OpenAI format
-                        audio_event = {
-                            "type": "input_audio_buffer.append",
-                            "audio": client_message["audio"]
-                        }
-                        await openai_client.send_event(audio_event)
-                    
-                    elif client_message["type"] == "audio_end":
-                        # Commit audio and request response
-                        await openai_client.send_event({"type": "input_audio_buffer.commit"})
-                        await openai_client.send_event({"type": "response.create"})
-                    
-                    elif client_message["type"] == "text_message":
-                        # Handle text input
-                        text_event = {
-                            "type": "conversation.item.create",
-                            "item": {
-                                "type": "message",
-                                "role": "user",
-                                "content": [{"type": "input_text", "text": client_message["text"]}]
-                            }
-                        }
-                        await openai_client.send_event(text_event)
-                        await openai_client.send_event({"type": "response.create"})
-                    
-                except WebSocketDisconnect:
-                    break
-                except Exception as e:
-                    logger.error(f"Error handling client message: {e}")
-                    break
+            elif event["type"] == "audio_end":
+                # Save full audio buffer to file
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
+                    tmp_file.write(buffer)
+                    tmp_file.flush()
 
-        # Run both handlers concurrently
-        await asyncio.gather(
-            handle_openai_messages(),
-            handle_client_messages()
-        )
+                    # Transcribe audio
+                    with open(tmp_file.name, "rb") as audio_file:
+                        transcript = client.audio.transcriptions.create(
+                            file=audio_file,
+                            model="whisper-1"
+                        )
 
+                os.unlink(tmp_file.name)
+
+                # Send transcript back to client
+                await websocket.send_json({"type": "conversation.item.input_audio_transcription.completed", "transcript": transcript.text})
+
+                # Get text reply from GPT
+                gpt_response = client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[
+                        {"role": "system", "content": "You are a helpful voice assistant. Keep responses concise."},
+                        {"role": "user", "content": transcript.text}
+                    ]
+                )
+                reply_text = gpt_response.choices[0].message.content
+
+                # Stream GPT text response
+                for word in reply_text.split():
+                    await websocket.send_json({"type": "response.text.delta", "delta": word + " "})
+                    await asyncio.sleep(0.05)
+
+                # Convert to speech
+                speech_response = client.audio.speech.create(
+                    model="gpt-4o-mini-tts",
+                    voice="nova",
+                    input=reply_text
+                )
+                speech_bytes = speech_response.content
+
+                # Encode audio as base64 PCM (simulate PCM16)
+                audio_base64 = base64.b64encode(speech_bytes).decode("utf-8")
+                await websocket.send_json({"type": "response.audio.delta", "delta": audio_base64})
+
+                await websocket.send_json({"type": "response.done"})
+                buffer.clear()
+
+    except WebSocketDisconnect:
+        print("Client disconnected")
     except Exception as e:
-        logger.error(f"WebSocket error: {e}")
-        await websocket.send_json({"type": "error", "message": str(e)})
-    
-    finally:
-        await openai_client.close()
+        await websocket.send_json({"type": "error", "error": {"message": str(e)}})
 
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
 
 
 
