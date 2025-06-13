@@ -1,211 +1,199 @@
 class VoiceAssistant {
     constructor() {
-        this.recordBtn = document.getElementById('recordBtn');
-        this.chatHistory = document.getElementById('chatHistory');
+        this.startBtn = document.getElementById('startBtn');
         this.status = document.getElementById('status');
-        this.responseAudio = document.getElementById('responseAudio');
+        this.chatHistory = document.getElementById('chatHistory');
+        this.audioPlayer = document.getElementById('responseAudio');
+        this.canvas = document.getElementById('audioVisualization');
+        this.ctx = this.canvas.getContext('2d');
 
         this.websocket = null;
         this.audioContext = null;
-        this.processor = null;
-        this.isSessionActive = false;
-        this.isRecording = false;
-        this.silenceTimeout = null;
+        this.isActive = false;
+        this.analyser = null;
 
-        this.initializeEventListeners();
+        this.initialize();
     }
 
-    initializeEventListeners() {
-        this.recordBtn.addEventListener('click', () => {
-            if (!this.isSessionActive) {
-                this.startSession();
-            } else {
-                this.stopSession();
-            }
-        });
+    initialize() {
+        this.setupCanvas();
+        this.startBtn.addEventListener('click', () => this.toggleSession());
+    }
+
+    setupCanvas() {
+        this.canvas.width = window.innerWidth * 0.8;
+        this.canvas.height = 100;
+    }
+
+    async toggleSession() {
+        this.isActive ? this.stopSession() : this.startSession();
     }
 
     async startSession() {
-        this.isSessionActive = true;
-        this.recordBtn.textContent = "🛑 Stop";
-        this.status.textContent = '🎤 Listening...';
-        this.status.classList.add('recording');
-        this.status.classList.remove('processing');
-
-        // Open WebSocket connection if not open
-        if (!this.websocket || this.websocket.readyState !== WebSocket.OPEN) {
-            await this.openWebSocket();
-        }
-
-        // Start audio capture and VAD
+        this.isActive = true;
+        this.startBtn.textContent = "🛑 Stop";
+        this.status.textContent = "🎤 Listening...";
+        
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            const source = this.audioContext.createMediaStreamSource(stream);
-            this.processor = this.audioContext.createScriptProcessor(4096, 1, 1);
-
-            source.connect(this.processor);
-            this.processor.connect(this.audioContext.destination);
-
-            this.processor.onaudioprocess = (e) => {
-                if (!this.isSessionActive) return;
-
-                const inputData = e.inputBuffer.getChannelData(0);
-                const isSilent = inputData.every(sample => Math.abs(sample) < 0.01);
-
-                if (!isSilent) {
-                    this.isRecording = true;
-                    clearTimeout(this.silenceTimeout);
-
-                    const pcm16 = new Int16Array(inputData.length);
-                    for (let i = 0; i < inputData.length; i++) {
-                        let s = Math.max(-1, Math.min(1, inputData[i]));
-                        pcm16[i] = s < 0 ? s * 32768 : s * 32767;
-                    }
-                    const base64Audio = btoa(String.fromCharCode(...new Uint8Array(pcm16.buffer)));
-                    if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
-                        this.websocket.send(JSON.stringify({
-                            type: "audio_data",
-                            audio: base64Audio
-                        }));
-                    }
-                }
-
-                // If currently recording and now silent, start silence timer
-                if (this.isRecording && isSilent && !this.silenceTimeout) {
-                    this.silenceTimeout = setTimeout(() => {
-                        if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
-                            this.websocket.send(JSON.stringify({ type: "audio_end" }));
-                        }
-                        this.isRecording = false;
-                        this.status.textContent = "🔄 Processing...";
-                        this.status.classList.remove('recording');
-                        this.status.classList.add('processing');
-                        this.silenceTimeout = null;
-                    }, 1200); // 1.2s silence triggers "audio_end"
-                }
-            };
-
+            this.setupAudioProcessing(stream);
+            this.connectWebSocket();
         } catch (error) {
-            this.showError('Microphone access denied or not available');
-            console.error('Error accessing microphone:', error);
+            this.showError("Microphone access required");
         }
+    }
+
+    async setupAudioProcessing(stream) {
+        this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        
+        // Audio visualization
+        const source = this.audioContext.createMediaStreamSource(stream);
+        this.analyser = this.audioContext.createAnalyser();
+        this.analyser.fftSize = 2048;
+        source.connect(this.analyser);
+        this.visualizeAudio();
+
+        // Audio processing
+        const processorCode = `
+            class AudioProcessor extends AudioWorkletProcessor {
+                process(inputs) {
+                    const input = inputs[0][0];
+                    if (input) {
+                        const pcm16 = new Int16Array(input.length);
+                        for (let i = 0; i < input.length; i++) {
+                            const sample = Math.max(-1, Math.min(1, input[i]));
+                            pcm16[i] = sample < 0 ? sample * 32768 : sample * 32767;
+                        }
+                        this.port.postMessage(pcm16.buffer, [pcm16.buffer]);
+                    }
+                    return true;
+                }
+            }
+            registerProcessor('audio-processor', AudioProcessor);
+        `;
+
+        const blob = new Blob([processorCode], { type: 'application/javascript' });
+        const url = URL.createObjectURL(blob);
+        await this.audioContext.audioWorklet.addModule(url);
+        
+        const processor = new AudioWorkletNode(this.audioContext, 'audio-processor');
+        processor.port.onmessage = (e) => this.handleAudioData(e.data);
+        source.connect(processor);
+        processor.connect(this.audioContext.destination);
+    }
+
+    handleAudioData(audioData) {
+        if (this.websocket?.readyState === WebSocket.OPEN) {
+            const base64 = btoa(String.fromCharCode(...new Uint8Array(audioData)));
+            this.websocket.send(JSON.stringify({ type: "audio_data", audio: base64 }));
+        }
+    }
+
+    visualizeAudio() {
+        const bufferLength = this.analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+
+        const draw = () => {
+            if (!this.isActive) return;
+            
+            this.analyser.getByteFrequencyData(dataArray);
+            this.ctx.fillStyle = '#1a1a1a';
+            this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+            const barWidth = (this.canvas.width / bufferLength) * 2.5;
+            let x = 0;
+
+            for (let i = 0; i < bufferLength; i++) {
+                const height = dataArray[i] / 2;
+                this.ctx.fillStyle = `hsl(${i * 2}, 100%, 50%)`;
+                this.ctx.fillRect(x, this.canvas.height - height, barWidth, height);
+                x += barWidth + 1;
+            }
+
+            requestAnimationFrame(draw.bind(this));
+        };
+
+        draw();
+    }
+
+    connectWebSocket() {
+        this.websocket = new WebSocket(`ws://${window.location.host}/ws`);
+        
+        this.websocket.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            switch (data.type) {
+                case 'transcription':
+                    this.addMessage(data.text, 'user');
+                    break;
+                case 'response_text':
+                    this.appendMessage(data.text, 'ai');
+                    break;
+                case 'response_audio':
+                    this.playAudio(data.audio);
+                    break;
+                case 'error':
+                    this.showError(data.error);
+                    break;
+            }
+        };
     }
 
     stopSession() {
-        this.isSessionActive = false;
-        this.isRecording = false;
-        this.recordBtn.textContent = "🚀 Start";
-        this.status.textContent = 'Session ended.';
-        this.status.classList.remove('recording', 'processing');
-        if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
+        this.isActive = false;
+        this.startBtn.textContent = "🚀 Start";
+        this.status.textContent = "Ready";
+        
+        if (this.websocket) {
+            this.websocket.send(JSON.stringify({ type: "audio_end" }));
             this.websocket.close();
         }
-        this.cleanupAudio();
+        
+        this.audioContext?.close();
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     }
 
-    async openWebSocket() {
-        return new Promise((resolve, reject) => {
-            this.websocket = new WebSocket((window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.host + '/ws');
-            this.websocket.onopen = () => {
-                this.websocket.onmessage = (event) => this.handleRealtimeEvent(JSON.parse(event.data));
-                resolve();
-            };
-            this.websocket.onerror = (e) => {
-                this.showError('WebSocket connection failed');
-                reject(e);
-            };
-            this.websocket.onclose = () => {
-                this.status.textContent = 'Disconnected';
-                this.status.classList.remove('processing', 'recording');
-            };
-        });
+    playAudio(base64Data) {
+        const audioBlob = this.base64ToBlob(base64Data, 'audio/mpeg');
+        this.audioPlayer.src = URL.createObjectURL(audioBlob);
+        this.audioPlayer.play();
     }
 
-    handleRealtimeEvent(event) {
-        switch (event.type) {
-            case 'conversation.item.input_audio_transcription.completed':
-                this.addMessage(event.transcript, "user");
-                break;
-            case 'response.text.delta':
-                this.appendToLastMessage(event.delta, "ai");
-                break;
-            case 'response.audio.delta':
-                this.playAudio(event.delta);
-                break;
-            case 'response.done':
-                this.status.textContent = '🎤 Listening...';
-                this.status.classList.remove('processing');
-                break;
-            case 'error':
-                this.showError(event.error.message);
-                this.status.textContent = 'Ready to listen...';
-                this.status.classList.remove('processing', 'recording');
-                break;
-        }
-    }
-
-    async playAudio(base64Audio) {
-        const audioBlob = base64ToBlob(base64Audio, 'audio/mpeg');
-        const audioUrl = URL.createObjectURL(audioBlob);
-        this.responseAudio.src = audioUrl;
-        this.responseAudio.play();
-    }
-
-    addMessage(message, sender) {
-        const messageDiv = document.createElement('div');
-        messageDiv.className = `message ${sender}-message`;
-        messageDiv.textContent = message;
-        this.chatHistory.appendChild(messageDiv);
+    addMessage(text, sender) {
+        const div = document.createElement('div');
+        div.className = `message ${sender}-message`;
+        div.textContent = text;
+        this.chatHistory.appendChild(div);
         this.chatHistory.scrollTop = this.chatHistory.scrollHeight;
     }
 
-    appendToLastMessage(text, sender) {
-        const messages = this.chatHistory.querySelectorAll(`.${sender}-message`);
+    appendMessage(text, sender) {
+        const messages = this.chatHistory.getElementsByClassName(`${sender}-message`);
         if (messages.length > 0) {
-            const lastMessage = messages[messages.length - 1];
-            lastMessage.textContent += text;
+            messages[messages.length - 1].textContent += text;
         } else {
             this.addMessage(text, sender);
         }
-        this.chatHistory.scrollTop = this.chatHistory.scrollHeight;
+    }
+
+    base64ToBlob(base64, type) {
+        const byteCharacters = atob(base64);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        return new Blob([new Uint8Array(byteNumbers)], { type });
     }
 
     showError(message) {
         const errorDiv = document.createElement('div');
-        errorDiv.className = 'error';
+        errorDiv.className = 'error-message';
         errorDiv.textContent = message;
         this.chatHistory.appendChild(errorDiv);
-        this.chatHistory.scrollTop = this.chatHistory.scrollHeight;
         setTimeout(() => errorDiv.remove(), 5000);
     }
-
-    cleanupAudio() {
-        if (this.audioContext) {
-            this.audioContext.close();
-            this.audioContext = null;
-        }
-        if (this.processor) {
-            this.processor.disconnect();
-            this.processor = null;
-        }
-        clearTimeout(this.silenceTimeout);
-    }
 }
 
-function base64ToBlob(base64, mimeType) {
-    const byteCharacters = atob(base64);
-    const byteNumbers = new Array(byteCharacters.length);
-    for (let i = 0; i < byteCharacters.length; i++) {
-        byteNumbers[i] = byteCharacters.charCodeAt(i);
-    }
-    const byteArray = new Uint8Array(byteNumbers);
-    return new Blob([byteArray], { type: mimeType });
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-    new VoiceAssistant();
-});
+document.addEventListener('DOMContentLoaded', () => new VoiceAssistant());
 
 
 
