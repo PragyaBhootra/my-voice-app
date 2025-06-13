@@ -45,7 +45,7 @@ class RealtimeClient:
         try:
             self.websocket = await websockets.connect(
                 self.url,
-                extra_headers=self.headers
+                additional_headers=self.headers
             )
             logger.info("Connected to OpenAI Realtime API")
             return True
