@@ -111,10 +111,8 @@ class RealtimeVoiceAssistant {
                 }
             };
 
-            // Only connect the source to the PCM processor (no direct output to speakers)
             source.connect(pcmNode);
 
-            // Visualization
             const analyser = this.audioContext.createAnalyser();
             analyser.fftSize = 2048;
             source.connect(analyser);
@@ -193,12 +191,28 @@ class RealtimeVoiceAssistant {
         for (let i = 0; i < pcm16.length; i++) {
             float32[i] = Math.max(-1.0, Math.min(pcm16[i] / 32768, 1.0));
         }
-        // Use the audio context's sample rate for playback
-        const sampleRate = this.audioContext.sampleRate || 16000;
-        const audioBuffer = this.audioContext.createBuffer(1, float32.length, sampleRate);
-        audioBuffer.copyToChannel(float32, 0);
+
+        const resampled = this.resample(float32, 16000, this.audioContext.sampleRate);
+
+        const audioBuffer = this.audioContext.createBuffer(1, resampled.length, this.audioContext.sampleRate);
+        audioBuffer.copyToChannel(resampled, 0);
         this.audioQueue.push(audioBuffer);
         if (!this.isPlaying) this.playAudioQueue();
+    }
+
+    resample(data, fromRate, toRate) {
+        if (fromRate === toRate) return data;
+        const ratio = toRate / fromRate;
+        const newLength = Math.round(data.length * ratio);
+        const result = new Float32Array(newLength);
+        for (let i = 0; i < newLength; i++) {
+            const origIndex = i / ratio;
+            const before = Math.floor(origIndex);
+            const after = Math.min(Math.ceil(origIndex), data.length - 1);
+            const weight = origIndex - before;
+            result[i] = data[before] * (1 - weight) + data[after] * weight;
+        }
+        return result;
     }
 
     playAudioQueue() {
@@ -255,6 +269,7 @@ class RealtimeVoiceAssistant {
 document.addEventListener('DOMContentLoaded', () => {
     new RealtimeVoiceAssistant();
 });
+
 
 
 
