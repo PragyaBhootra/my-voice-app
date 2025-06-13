@@ -6,3 +6,4 @@ sounddevice>=0.4.6
 scipy>=1.0
 fastapi
 uvicorn
+websockets>=12.0
