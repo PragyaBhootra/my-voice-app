@@ -111,8 +111,10 @@ class RealtimeVoiceAssistant {
                 }
             };
 
+            // Only connect the source to the PCM processor (no direct output to speakers)
             source.connect(pcmNode);
 
+            // Visualization
             const analyser = this.audioContext.createAnalyser();
             analyser.fftSize = 2048;
             source.connect(analyser);
@@ -180,39 +182,47 @@ class RealtimeVoiceAssistant {
         }
     }
 
-    bufferAndPlayPCM16(base64Audio) {
+    // Resample PCM16 audio from 16kHz to audioContext.sampleRate for correct speed
+    async bufferAndPlayPCM16(base64Audio) {
         const binaryString = atob(base64Audio);
         const bytes = new Uint8Array(binaryString.length);
         for (let i = 0; i < binaryString.length; i++) {
             bytes[i] = binaryString.charCodeAt(i);
         }
-        const pcm16 = new Int16Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength / 2));
+        const pcm16 = new Int16Array(bytes.buffer);
         const float32 = new Float32Array(pcm16.length);
         for (let i = 0; i < pcm16.length; i++) {
             float32[i] = Math.max(-1.0, Math.min(pcm16[i] / 32768, 1.0));
         }
-
-        const resampled = this.resample(float32, 16000, this.audioContext.sampleRate);
-
-        const audioBuffer = this.audioContext.createBuffer(1, resampled.length, this.audioContext.sampleRate);
+        // Resample if needed
+        const fromSampleRate = 16000; // incoming audio sample rate
+        const toSampleRate = this.audioContext.sampleRate;
+        let resampled;
+        if (fromSampleRate !== toSampleRate) {
+            resampled = await this.resampleFloat32(float32, fromSampleRate, toSampleRate);
+        } else {
+            resampled = float32;
+        }
+        const audioBuffer = this.audioContext.createBuffer(1, resampled.length, toSampleRate);
         audioBuffer.copyToChannel(resampled, 0);
         this.audioQueue.push(audioBuffer);
         if (!this.isPlaying) this.playAudioQueue();
     }
 
-    resample(data, fromRate, toRate) {
-        if (fromRate === toRate) return data;
-        const ratio = toRate / fromRate;
-        const newLength = Math.round(data.length * ratio);
-        const result = new Float32Array(newLength);
+    // Simple linear interpolation resampler for Float32Array
+    async resampleFloat32(float32, fromSampleRate, toSampleRate) {
+        if (fromSampleRate === toSampleRate) return float32;
+        const ratio = toSampleRate / fromSampleRate;
+        const newLength = Math.round(float32.length * ratio);
+        const resampled = new Float32Array(newLength);
         for (let i = 0; i < newLength; i++) {
-            const origIndex = i / ratio;
-            const before = Math.floor(origIndex);
-            const after = Math.min(Math.ceil(origIndex), data.length - 1);
-            const weight = origIndex - before;
-            result[i] = data[before] * (1 - weight) + data[after] * weight;
+            const origIdx = i / ratio;
+            const idx0 = Math.floor(origIdx);
+            const idx1 = Math.min(idx0 + 1, float32.length - 1);
+            const frac = origIdx - idx0;
+            resampled[i] = float32[idx0] * (1 - frac) + float32[idx1] * frac;
         }
-        return result;
+        return resampled;
     }
 
     playAudioQueue() {
@@ -269,6 +279,7 @@ class RealtimeVoiceAssistant {
 document.addEventListener('DOMContentLoaded', () => {
     new RealtimeVoiceAssistant();
 });
+
 
 
 
