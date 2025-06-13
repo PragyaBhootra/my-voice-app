@@ -111,8 +111,10 @@ class RealtimeVoiceAssistant {
                 }
             };
 
-            source.connect(pcmNode).connect(this.audioContext.destination);
+            // Only connect the source to the PCM processor (no direct output to speakers)
+            source.connect(pcmNode);
 
+            // Visualization
             const analyser = this.audioContext.createAnalyser();
             analyser.fftSize = 2048;
             source.connect(analyser);
@@ -186,12 +188,14 @@ class RealtimeVoiceAssistant {
         for (let i = 0; i < binaryString.length; i++) {
             bytes[i] = binaryString.charCodeAt(i);
         }
-        const pcm16 = new Int16Array(bytes.buffer);
+        const pcm16 = new Int16Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength / 2));
         const float32 = new Float32Array(pcm16.length);
         for (let i = 0; i < pcm16.length; i++) {
             float32[i] = Math.max(-1.0, Math.min(pcm16[i] / 32768, 1.0));
         }
-        const audioBuffer = this.audioContext.createBuffer(1, float32.length, 16000);
+        // Use the audio context's sample rate for playback
+        const sampleRate = this.audioContext.sampleRate || 16000;
+        const audioBuffer = this.audioContext.createBuffer(1, float32.length, sampleRate);
         audioBuffer.copyToChannel(float32, 0);
         this.audioQueue.push(audioBuffer);
         if (!this.isPlaying) this.playAudioQueue();
