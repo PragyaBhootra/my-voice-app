@@ -4,11 +4,8 @@ class RealtimeVoiceAssistant {
         this.audioContext = null;
         this.isConnected = false;
         this.isRecording = false;
-        this.mp3Encoder = null;
-        this.mp3Chunks = [];
 
         this.startBtn = document.getElementById('startBtn');
-        this.downloadBtn = document.getElementById('downloadBtn');
         this.statusEl = document.getElementById('status');
         this.chatHistory = document.getElementById('chatHistory');
         this.canvas = document.getElementById('audioVisualization');
@@ -25,10 +22,6 @@ class RealtimeVoiceAssistant {
                 this.disconnect();
             }
         });
-
-        this.downloadBtn.addEventListener('click', () => {
-            this.downloadConversation();
-        });
     }
 
     async connect() {
@@ -43,7 +36,6 @@ class RealtimeVoiceAssistant {
                 this.isConnected = true;
                 this.startBtn.textContent = "🛑 Stop Chat";
                 this.statusEl.textContent = "Connected! Setting up audio...";
-                this.downloadBtn.style.display = 'none';
                 await this.setupAudio();
             };
 
@@ -55,7 +47,6 @@ class RealtimeVoiceAssistant {
                 this.isConnected = false;
                 this.startBtn.textContent = "🚀 Start Realtime Chat";
                 this.statusEl.textContent = "Disconnected";
-                this.downloadBtn.style.display = 'block';
                 this.cleanupAudio();
             };
 
@@ -85,19 +76,13 @@ class RealtimeVoiceAssistant {
                 sampleRate: 16000
             });
 
-            // Initialize MP3 encoder
-            this.mp3Encoder = new lamejs.Mp3Encoder(1, 16000, 128); // Mono, 16kHz, 128kbps
-            this.mp3Chunks = [];
-
             const source = this.audioContext.createMediaStreamSource(stream);
 
-            // Visualization
             const analyser = this.audioContext.createAnalyser();
             analyser.fftSize = 2048;
             source.connect(analyser);
             this.visualizeAudio(analyser);
 
-            // Audio data sending
             this.isRecording = true;
             this.statusEl.textContent = "🎤 Listening... (speak naturally)";
             this.sendAudioChunks(source);
@@ -129,65 +114,124 @@ class RealtimeVoiceAssistant {
         };
     }
 
+    visualizeAudio(analyser) {
+        const bufferLength = analyser.fftSize;
+        const dataArray = new Uint8Array(bufferLength);
+
+        const draw = () => {
+            analyser.getByteTimeDomainData(dataArray);
+            this.canvasCtx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+            this.canvasCtx.strokeStyle = '#00ffff';
+            this.canvasCtx.lineWidth = 2;
+            this.canvasCtx.beginPath();
+
+            const sliceWidth = this.canvas.width / bufferLength;
+            let x = 0;
+            for (let i = 0; i < bufferLength; i++) {
+                const v = dataArray[i] / 128.0;
+                const y = this.canvas.height / 2 + v * this.canvas.height / 4;
+                if (i === 0) {
+                    this.canvasCtx.moveTo(x, y);
+                } else {
+                    this.canvasCtx.lineTo(x, y);
+                }
+                x += sliceWidth;
+            }
+            this.canvasCtx.stroke();
+            requestAnimationFrame(draw);
+        };
+        draw();
+    }
+
+    handleRealtimeEvent(event) {
+        console.log('Received event:', event.type);
+
+        switch (event.type) {
+            case 'session.created':
+                this.addMessage("Session started successfully", "system");
+                break;
+            case 'conversation.item.input_audio_transcription.completed':
+                this.addMessage(event.transcript, "user");
+                break;
+            case 'response.text.delta':
+                this.appendToLastMessage(event.delta, "ai");
+                break;
+            case 'response.audio.delta':
+                this.playAudioDelta(event.delta);
+                break;
+            case 'response.done':
+                this.statusEl.textContent = "🎤 Listening... (speak naturally)";
+                break;
+            case 'error':
+                this.addMessage(`Error: ${event.error.message}`, "error");
+                break;
+        }
+    }
+
     playAudioDelta(base64Audio) {
         try {
-            // Decode base64 to PCM16
             const binaryString = atob(base64Audio);
             const bytes = new Uint8Array(binaryString.length);
             for (let i = 0; i < binaryString.length; i++) {
                 bytes[i] = binaryString.charCodeAt(i);
             }
 
-            // Convert PCM16 to MP3
-            const pcmData = new Int16Array(bytes.buffer);
-            const mp3Buffer = this.mp3Encoder.encodeBuffer(pcmData);
-            this.mp3Chunks.push(mp3Buffer);
+            const pcm16 = new Int16Array(bytes.buffer);
 
-            // Play MP3
-            const mp3Blob = new Blob([mp3Buffer], { type: 'audio/mpeg' });
-            const audioUrl = URL.createObjectURL(mp3Blob);
-            const audioElement = new Audio(audioUrl);
-            audioElement.play();
+            const mp3Encoder = new lamejs.Mp3Encoder(1, 16000, 128); // mono, 16kHz, 128kbps
+            const mp3Data = mp3Encoder.encodeBuffer(pcm16);
+            const mp3End = mp3Encoder.flush();
+            const mp3Blob = new Blob([new Uint8Array([...mp3Data, ...mp3End])], { type: 'audio/mp3' });
+
+            const url = URL.createObjectURL(mp3Blob);
+            const audio = new Audio(url);
+            audio.play();
 
         } catch (error) {
             console.error('Audio playback error:', error);
         }
     }
 
-    downloadConversation() {
-        if (this.mp3Chunks.length === 0) return;
-
-        // Flush remaining MP3 data
-        const finalBuffer = this.mp3Encoder.flush();
-        if (finalBuffer.length > 0) {
-            this.mp3Chunks.push(finalBuffer);
-        }
-
-        // Combine all chunks
-        const fullMP3 = new Uint8Array(
-            this.mp3Chunks.reduce((acc, chunk) => {
-                acc.push(...chunk);
-                return acc;
-            }, [])
-        );
-
-        // Create download link
-        const blob = new Blob([fullMP3], { type: 'audio/mpeg' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'conversation.mp3';
-        a.click();
-        URL.revokeObjectURL(url);
+    addMessage(text, sender) {
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `message ${sender}-message`;
+        messageDiv.textContent = text;
+        this.chatHistory.appendChild(messageDiv);
+        this.chatHistory.scrollTop = this.chatHistory.scrollHeight;
     }
 
-    // ... [Keep other methods unchanged from previous version] ...
+    appendToLastMessage(text, sender) {
+        const messages = this.chatHistory.querySelectorAll(`.${sender}-message`);
+        if (messages.length > 0) {
+            const lastMessage = messages[messages.length - 1];
+            lastMessage.textContent += text;
+        } else {
+            this.addMessage(text, sender);
+        }
+        this.chatHistory.scrollTop = this.chatHistory.scrollHeight;
+    }
+
+    disconnect() {
+        this.isRecording = false;
+        if (this.websocket) {
+            this.websocket.close();
+        }
+        this.cleanupAudio();
+    }
+
+    cleanupAudio() {
+        if (this.audioContext) {
+            this.audioContext.close();
+            this.audioContext = null;
+        }
+    }
 }
 
 // Initialize when page loads
 document.addEventListener('DOMContentLoaded', () => {
     new RealtimeVoiceAssistant();
 });
+
 
 
 
