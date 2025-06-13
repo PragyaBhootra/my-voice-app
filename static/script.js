@@ -4,6 +4,8 @@ class RealtimeVoiceAssistant {
         this.audioContext = null;
         this.isConnected = false;
         this.isRecording = false;
+        this.audioQueue = [];
+        this.isPlaying = false;
 
         this.startBtn = document.getElementById('startBtn');
         this.statusEl = document.getElementById('status');
@@ -103,7 +105,9 @@ class RealtimeVoiceAssistant {
                 const audioData = event.inputBuffer.getChannelData(0);
                 const int16Array = new Int16Array(audioData.length);
                 for (let i = 0; i < audioData.length; i++) {
-                    int16Array[i] = Math.max(-32768, Math.min(32767, audioData[i] * 32768));
+                    // Clamp and convert to PCM16
+                    let s = Math.max(-1, Math.min(1, audioData[i]));
+                    int16Array[i] = s < 0 ? s * 32768 : s * 32767;
                 }
                 const base64Audio = btoa(String.fromCharCode(...new Uint8Array(int16Array.buffer)));
                 this.websocket.send(JSON.stringify({
@@ -157,7 +161,7 @@ class RealtimeVoiceAssistant {
                 this.appendToLastMessage(event.delta, "ai");
                 break;
             case 'response.audio.delta':
-                this.playAudioDelta(event.delta);
+                this.bufferAndPlayPCM16(event.delta);
                 break;
             case 'response.done':
                 this.statusEl.textContent = "🎤 Listening... (speak naturally)";
@@ -168,33 +172,38 @@ class RealtimeVoiceAssistant {
         }
     }
 
-    playAudioDelta(base64Audio) {
-        try {
-            const binaryString = atob(base64Audio);
-            const bytes = new Uint8Array(binaryString.length);
-            for (let i = 0; i < binaryString.length; i++) {
-                bytes[i] = binaryString.charCodeAt(i);
-            }
-
-            const pcm16 = new Int16Array(bytes.buffer);
-            const float32 = new Float32Array(pcm16.length);
-
-             for (let i = 0; i < pcm16.length; i++) {
-                 float32[i] = pcm16[i] / 32768;
-            }
-
-            const audioBuffer = this.audioContext.createBuffer(1, float32.length, 16000);
-            audioBuffer.copyToChannel(float32, 0);
-            
-            const source = this.audioContext.createBufferSource();
-            source.buffer = audioBuffer;
-            source.connect(this.audioContext.destination);
-            source.start();
-
-
-        } catch (error) {
-            console.error('Audio playback error:', error);
+    bufferAndPlayPCM16(base64Audio) {
+        // Decode base64 to PCM16
+        const binaryString = atob(base64Audio);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
         }
+        const pcm16 = new Int16Array(bytes.buffer);
+        // Convert PCM16 to Float32 [-1, 1]
+        const float32 = new Float32Array(pcm16.length);
+        for (let i = 0; i < pcm16.length; i++) {
+            float32[i] = Math.max(-1.0, Math.min(pcm16[i] / 32768, 1.0));
+        }
+        // Create AudioBuffer and queue for smooth playback
+        const audioBuffer = this.audioContext.createBuffer(1, float32.length, 16000);
+        audioBuffer.copyToChannel(float32, 0);
+        this.audioQueue.push(audioBuffer);
+        if (!this.isPlaying) this.playAudioQueue();
+    }
+
+    playAudioQueue() {
+        if (this.audioQueue.length === 0) {
+            this.isPlaying = false;
+            return;
+        }
+        this.isPlaying = true;
+        const buffer = this.audioQueue.shift();
+        const source = this.audioContext.createBufferSource();
+        source.buffer = buffer;
+        source.connect(this.audioContext.destination);
+        source.start();
+        source.onended = () => this.playAudioQueue();
     }
 
     addMessage(text, sender) {
@@ -229,6 +238,8 @@ class RealtimeVoiceAssistant {
             this.audioContext.close();
             this.audioContext = null;
         }
+        this.audioQueue = [];
+        this.isPlaying = false;
     }
 }
 
@@ -236,6 +247,7 @@ class RealtimeVoiceAssistant {
 document.addEventListener('DOMContentLoaded', () => {
     new RealtimeVoiceAssistant();
 });
+
 
 
 
