@@ -3,16 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🎤 Voice Assistant</title>
+    <title>🎤 Realtime Voice Assistant</title>
     <link rel="stylesheet" href="/static/style.css">
-    <!-- Load VAD library first -->
-    <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.22/dist/vad.umd.min.js"></script>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>🎙️ AI Voice Assistant</h1>
-            <p>Click start to begin conversation</p>
+            <h1>🎙️ Realtime AI Assistant</h1>
+            <p>Real-time conversation with GPT-4o</p>
         </header>
 
         <div class="chat-container">
@@ -21,19 +19,20 @@
 
         <div class="controls">
             <button id="startBtn" class="start-btn">
-                <span class="btn-text">🚀 Start Conversation</span>
+                <span class="btn-text">🚀 Start Realtime Chat</span>
             </button>
             <div id="status" class="status">Click start to begin</div>
         </div>
 
-        <div class="audio-player">
-            <audio id="responseAudio" hidden></audio>
+        <div class="audio-controls">
+            <canvas id="audioVisualization" width="400" height="100"></canvas>
         </div>
     </div>
 
     <script src="/static/script.js"></script>
 </body>
 </html>
+
 
 
 
