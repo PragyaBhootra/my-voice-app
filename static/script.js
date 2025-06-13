@@ -1,3 +1,4 @@
+// script.js
 class RealtimeVoiceAssistant {
     constructor() {
         this.websocket = null;
@@ -7,6 +8,7 @@ class RealtimeVoiceAssistant {
         this.audioQueue = [];
         this.isPlaying = false;
         this.processor = null;
+        this.silenceTimeout = null;
 
         this.startBtn = document.getElementById('startBtn');
         this.statusEl = document.getElementById('status');
@@ -92,27 +94,34 @@ class RealtimeVoiceAssistant {
                 if (!this.isRecording) return;
 
                 const inputData = e.inputBuffer.getChannelData(0);
-                // Logging for debugging
-                if (inputData.length && inputData.some(val => val !== 0)) {
-                    console.log('Audio samples:', inputData.slice(0, 10));
-                }
+                // Check for silence
+                const isSilent = inputData.every(sample => Math.abs(sample) < 0.01);
 
-                const pcm16 = new Int16Array(inputData.length);
-                for (let i = 0; i < inputData.length; i++) {
-                    let s = Math.max(-1, Math.min(1, inputData[i]));
-                    pcm16[i] = s < 0 ? s * 32768 : s * 32767;
-                }
+                // Send audio data if not silent
+                if (!isSilent) {
+                    clearTimeout(this.silenceTimeout);
 
-                const base64Audio = btoa(String.fromCharCode(...new Uint8Array(pcm16.buffer)));
-                if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
-                    // Debug log
-                    console.log('Sending audio chunk:', pcm16.length);
-                    this.websocket.send(JSON.stringify({
-                        type: "audio_data",
-                        audio: base64Audio
-                    }));
-                } else {
-                    console.error('WebSocket not open! State:', this.websocket?.readyState);
+                    const pcm16 = new Int16Array(inputData.length);
+                    for (let i = 0; i < inputData.length; i++) {
+                        let s = Math.max(-1, Math.min(1, inputData[i]));
+                        pcm16[i] = s < 0 ? s * 32768 : s * 32767;
+                    }
+
+                    const base64Audio = btoa(String.fromCharCode(...new Uint8Array(pcm16.buffer)));
+                    if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
+                        this.websocket.send(JSON.stringify({
+                            type: "audio_data",
+                            audio: base64Audio
+                        }));
+                    }
+                    // Reset silence timeout after sending audio
+                    this.silenceTimeout = setTimeout(() => {
+                        if (this.websocket?.readyState === WebSocket.OPEN) {
+                            console.log('🔇 Silence detected - sending audio_end');
+                            this.websocket.send(JSON.stringify({ type: "audio_end" }));
+                        }
+                        this.isRecording = false;
+                    }, 1200); // 1.2 seconds of silence triggers end
                 }
             };
 
@@ -176,7 +185,6 @@ class RealtimeVoiceAssistant {
     }
 
     async playAudio(base64Audio) {
-        // Play audio as received (assumed MP3 or WAV)
         const audioBlob = base64ToBlob(base64Audio, 'audio/mpeg');
         const arrayBuffer = await audioBlob.arrayBuffer();
 
@@ -226,6 +234,7 @@ class RealtimeVoiceAssistant {
             this.processor.disconnect();
             this.processor = null;
         }
+        clearTimeout(this.silenceTimeout);
     }
 }
 
@@ -242,6 +251,7 @@ function base64ToBlob(base64, mimeType) {
 document.addEventListener('DOMContentLoaded', () => {
     new RealtimeVoiceAssistant();
 });
+
 
 
 
