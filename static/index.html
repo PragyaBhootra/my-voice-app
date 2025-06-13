@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>🎤 Realtime Voice Assistant</title>
     <link rel="stylesheet" href="/static/style.css">
+    <!-- Add LAME MP3 Encoder -->
+    <script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.0/lame.min.js"></script>
 </head>
 <body>
     <div class="container">
@@ -21,6 +23,9 @@
             <button id="startBtn" class="start-btn">
                 <span class="btn-text">🚀 Start Realtime Chat</span>
             </button>
+            <button id="downloadBtn" class="download-btn" style="display:none;">
+                💾 Download Conversation
+            </button>
             <div id="status" class="status">Click start to begin</div>
         </div>
 
@@ -32,6 +37,7 @@
     <script src="/static/script.js"></script>
 </body>
 </html>
+
 
 
 
