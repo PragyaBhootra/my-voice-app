@@ -1,118 +1,98 @@
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
 import tempfile
 import os
-import json
-import base64
-import asyncio
-import wave
-import uvicorn
+from pydantic import BaseModel
 
 app = FastAPI()
 
+# CORS middleware for frontend-backend communication
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# OpenAI client
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-def create_wav(buffer: bytes) -> str:
-    """Create WAV file from PCM16 data"""
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
-        with wave.open(f.name, 'wb') as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(16000)
-            wf.writeframes(buffer)
-        return f.name
+class ChatRequest(BaseModel):
+    message: str
 
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-    buffer = bytearray()
-    
+@app.get("/", response_class=HTMLResponse)
+async def get_home():
+    with open("static/index.html", "r") as f:
+        return HTMLResponse(f.read())
+
+@app.post("/transcribe")
+async def transcribe_audio(request: Request):
     try:
-        while True:
-            data = await websocket.receive_text()
-            event = json.loads(data)
-
-            if event["type"] == "audio_data":
-                buffer.extend(base64.b64decode(event["audio"]))
-                
-            elif event["type"] == "audio_end":
-                if not buffer:
-                    await websocket.send_json({"type": "error", "error": "No audio received"})
-                    continue
-
-                try:
-                    # Transcribe audio
-                    wav_path = create_wav(bytes(buffer))
-                    transcript = client.audio.transcriptions.create(
-                        file=open(wav_path, "rb"),
-                        model="whisper-1"
-                    )
-                    os.unlink(wav_path)
-                    
-                    await websocket.send_json({
-                        "type": "transcription",
-                        "text": transcript.text
-                    })
-
-                    # Generate response
-                    response = client.chat.completions.create(
-                        model="gpt-4o",
-                        messages=[{
-                            "role": "system",
-                            "content": "You are a helpful voice assistant. Keep responses natural and concise."
-                        }, {
-                            "role": "user",
-                            "content": transcript.text
-                        }]
-                    )
-                    reply = response.choices[0].message.content
-
-                    # Stream response
-                    for chunk in [reply[i:i+20] for i in range(0, len(reply), 20)]:
-                        await websocket.send_json({
-                            "type": "response_text",
-                            "text": chunk
-                        })
-                        await asyncio.sleep(0.1)
-
-                    # Generate speech
-                    speech = client.audio.speech.create(
-                        model="tts-1-hd",
-                        voice="nova",
-                        input=reply,
-                        response_format="mp3"
-                    )
-                    await websocket.send_json({
-                        "type": "response_audio",
-                        "audio": base64.b64encode(speech.content).decode()
-                    })
-
-                except Exception as e:
-                    await websocket.send_json({
-                        "type": "error",
-                        "error": f"Processing error: {str(e)}"
-                    })
-                finally:
-                    buffer.clear()
-
+        audio_data = await request.body()
+        
+        # Save audio to temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
+            tmp_file.write(audio_data)
+            tmp_file.flush()
+            
+            # Transcribe with OpenAI Whisper
+            with open(tmp_file.name, "rb") as audio_file:
+                transcript = client.audio.transcriptions.create(
+                    file=audio_file,
+                    model="whisper-1"
+                )
+        
+        os.unlink(tmp_file.name)
+        return {"transcription": transcript.text}
+    
     except Exception as e:
-        print(f"WebSocket error: {str(e)}")
-    finally:
-        await websocket.close()
+        raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/chat")
+async def chat_with_gpt(request: ChatRequest):
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "You are a helpful voice assistant. Keep responses concise."},
+                {"role": "user", "content": request.message}
+            ]
+        )
+        return {"response": response.choices[0].message.content}
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/speak")
+async def text_to_speech(request: ChatRequest):
+    try:
+        speech_response = client.audio.speech.create(
+            model="tts-1",
+            voice="nova",
+            input=request.message
+        )
+        
+        return StreamingResponse(
+            iter([speech_response.content]),
+            media_type="audio/mpeg",
+            headers={"Content-Disposition": "attachment; filename=speech.mp3"}
+        )
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+        
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
+
 
 
 
