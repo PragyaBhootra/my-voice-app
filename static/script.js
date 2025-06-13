@@ -1,18 +1,16 @@
 class RealtimeVoiceAssistant {
     constructor() {
         this.websocket = null;
-        this.mediaRecorder = null;
         this.audioContext = null;
-        this.audioQueue = [];
         this.isConnected = false;
         this.isRecording = false;
-        
+
         this.startBtn = document.getElementById('startBtn');
         this.statusEl = document.getElementById('status');
         this.chatHistory = document.getElementById('chatHistory');
         this.canvas = document.getElementById('audioVisualization');
         this.canvasCtx = this.canvas.getContext('2d');
-        
+
         this.initializeEventListeners();
     }
 
@@ -29,13 +27,11 @@ class RealtimeVoiceAssistant {
     async connect() {
         try {
             this.statusEl.textContent = "Connecting...";
-            
-            // Connect WebSocket
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const wsUrl = `${protocol}//${window.location.host}/ws`;
-            
+
             this.websocket = new WebSocket(wsUrl);
-            
+
             this.websocket.onopen = async () => {
                 this.isConnected = true;
                 this.startBtn.textContent = "🛑 Stop Chat";
@@ -51,6 +47,7 @@ class RealtimeVoiceAssistant {
                 this.isConnected = false;
                 this.startBtn.textContent = "🚀 Start Realtime Chat";
                 this.statusEl.textContent = "Disconnected";
+                this.cleanupAudio();
             };
 
             this.websocket.onerror = (error) => {
@@ -66,37 +63,31 @@ class RealtimeVoiceAssistant {
 
     async setupAudio() {
         try {
-            // Request microphone access
-            const stream = await navigator.mediaDevices.getUserMedia({ 
+            const stream = await navigator.mediaDevices.getUserMedia({
                 audio: {
                     sampleRate: 16000,
                     channelCount: 1,
                     echoCancellation: true,
                     noiseSuppression: true
-                } 
+                }
             });
 
             this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
                 sampleRate: 16000
             });
 
-            // Setup audio processing
             const source = this.audioContext.createMediaStreamSource(stream);
-            const processor = this.audioContext.createScriptProcessor(4096, 1, 1);
-            
-            processor.onaudioprocess = (event) => {
-                if (this.isRecording) {
-                    const audioData = event.inputBuffer.getChannelData(0);
-                    this.sendAudioData(audioData);
-                    this.visualizeAudio(audioData);
-                }
-            };
 
-            source.connect(processor);
-            processor.connect(this.audioContext.destination);
+            // Visualization
+            const analyser = this.audioContext.createAnalyser();
+            analyser.fftSize = 2048;
+            source.connect(analyser);
+            this.visualizeAudio(analyser);
 
-            this.statusEl.textContent = "Ready - Start speaking!";
-            this.startRecording();
+            // Audio data sending
+            this.isRecording = true;
+            this.statusEl.textContent = "🎤 Listening... (speak naturally)";
+            this.sendAudioChunks(source);
 
         } catch (error) {
             console.error('Audio setup failed:', error);
@@ -104,60 +95,77 @@ class RealtimeVoiceAssistant {
         }
     }
 
-    startRecording() {
-        this.isRecording = true;
-        this.statusEl.textContent = "🎤 Listening... (speak naturally)";
-    }
+    sendAudioChunks(source) {
+        const processor = this.audioContext.createScriptProcessor(4096, 1, 1);
+        source.connect(processor);
+        processor.connect(this.audioContext.destination);
 
-    stopRecording() {
-        this.isRecording = false;
-        if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
-            this.websocket.send(JSON.stringify({ type: "audio_end" }));
-        }
-    }
-
-    sendAudioData(audioData) {
-        if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
-            // Convert Float32Array to Int16Array
-            const int16Array = new Int16Array(audioData.length);
-            for (let i = 0; i < audioData.length; i++) {
-                int16Array[i] = Math.max(-32768, Math.min(32767, audioData[i] * 32768));
+        processor.onaudioprocess = (event) => {
+            if (this.isRecording && this.websocket && this.websocket.readyState === WebSocket.OPEN) {
+                const audioData = event.inputBuffer.getChannelData(0);
+                // Convert Float32Array to Int16Array PCM
+                const int16Array = new Int16Array(audioData.length);
+                for (let i = 0; i < audioData.length; i++) {
+                    int16Array[i] = Math.max(-32768, Math.min(32767, audioData[i] * 32768));
+                }
+                // Convert to base64
+                const base64Audio = btoa(String.fromCharCode(...new Uint8Array(int16Array.buffer)));
+                this.websocket.send(JSON.stringify({
+                    type: "audio_data",
+                    audio: base64Audio
+                }));
             }
-            
-            // Convert to base64
-            const base64Audio = btoa(String.fromCharCode(...new Uint8Array(int16Array.buffer)));
-            
-            this.websocket.send(JSON.stringify({
-                type: "audio_data",
-                audio: base64Audio
-            }));
-        }
+        };
+    }
+
+    visualizeAudio(analyser) {
+        const bufferLength = analyser.fftSize;
+        const dataArray = new Uint8Array(bufferLength);
+
+        const draw = () => {
+            analyser.getByteTimeDomainData(dataArray);
+            this.canvasCtx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+            this.canvasCtx.strokeStyle = '#00ffff';
+            this.canvasCtx.lineWidth = 2;
+            this.canvasCtx.beginPath();
+
+            const sliceWidth = this.canvas.width / bufferLength;
+            let x = 0;
+            for (let i = 0; i < bufferLength; i++) {
+                const v = dataArray[i] / 128.0;
+                const y = this.canvas.height / 2 + v * this.canvas.height / 4;
+                if (i === 0) {
+                    this.canvasCtx.moveTo(x, y);
+                } else {
+                    this.canvasCtx.lineTo(x, y);
+                }
+                x += sliceWidth;
+            }
+            this.canvasCtx.stroke();
+            requestAnimationFrame(draw);
+        };
+        draw();
     }
 
     handleRealtimeEvent(event) {
         console.log('Received event:', event.type);
-        
+
         switch (event.type) {
             case 'session.created':
                 this.addMessage("Session started successfully", "system");
                 break;
-                
             case 'conversation.item.input_audio_transcription.completed':
                 this.addMessage(event.transcript, "user");
                 break;
-                
             case 'response.text.delta':
                 this.appendToLastMessage(event.delta, "ai");
                 break;
-                
             case 'response.audio.delta':
                 this.playAudioDelta(event.delta);
                 break;
-                
             case 'response.done':
                 this.statusEl.textContent = "🎤 Listening... (speak naturally)";
                 break;
-                
             case 'error':
                 this.addMessage(`Error: ${event.error.message}`, "error");
                 break;
@@ -166,51 +174,28 @@ class RealtimeVoiceAssistant {
 
     playAudioDelta(base64Audio) {
         try {
-            // Decode base64 audio
+            // Decode base64 to get raw PCM16 data
             const binaryString = atob(base64Audio);
             const bytes = new Uint8Array(binaryString.length);
             for (let i = 0; i < binaryString.length; i++) {
                 bytes[i] = binaryString.charCodeAt(i);
             }
-            
-            // Convert to AudioBuffer and play
-            this.audioContext.decodeAudioData(bytes.buffer).then(audioBuffer => {
-                const source = this.audioContext.createBufferSource();
-                source.buffer = audioBuffer;
-                source.connect(this.audioContext.destination);
-                source.start();
-            });
+            // Convert raw PCM16 to Float32Array
+            const pcm16Data = new Int16Array(bytes.buffer);
+            const float32Data = new Float32Array(pcm16Data.length);
+            for (let i = 0; i < pcm16Data.length; i++) {
+                float32Data[i] = pcm16Data[i] / 32768.0;
+            }
+            // Create AudioBuffer and play
+            const audioBuffer = this.audioContext.createBuffer(1, float32Data.length, 16000);
+            audioBuffer.getChannelData(0).set(float32Data);
+            const source = this.audioContext.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(this.audioContext.destination);
+            source.start();
         } catch (error) {
             console.error('Audio playback error:', error);
         }
-    }
-
-    visualizeAudio(audioData) {
-        const width = this.canvas.width;
-        const height = this.canvas.height;
-        
-        this.canvasCtx.clearRect(0, 0, width, height);
-        this.canvasCtx.strokeStyle = '#00ffff';
-        this.canvasCtx.lineWidth = 2;
-        this.canvasCtx.beginPath();
-        
-        const sliceWidth = width / audioData.length;
-        let x = 0;
-        
-        for (let i = 0; i < audioData.length; i++) {
-            const v = audioData[i] * 200;
-            const y = height / 2 + v;
-            
-            if (i === 0) {
-                this.canvasCtx.moveTo(x, y);
-            } else {
-                this.canvasCtx.lineTo(x, y);
-            }
-            
-            x += sliceWidth;
-        }
-        
-        this.canvasCtx.stroke();
     }
 
     addMessage(text, sender) {
@@ -237,8 +222,13 @@ class RealtimeVoiceAssistant {
         if (this.websocket) {
             this.websocket.close();
         }
+        this.cleanupAudio();
+    }
+
+    cleanupAudio() {
         if (this.audioContext) {
             this.audioContext.close();
+            this.audioContext = null;
         }
     }
 }
