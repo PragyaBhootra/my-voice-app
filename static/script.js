@@ -1,4 +1,3 @@
-// script.js
 class RealtimeVoiceAssistant {
     constructor() {
         this.websocket = null;
@@ -7,6 +6,7 @@ class RealtimeVoiceAssistant {
         this.isRecording = false;
         this.audioQueue = [];
         this.isPlaying = false;
+        this.processor = null;
 
         this.startBtn = document.getElementById('startBtn');
         this.statusEl = document.getElementById('status');
@@ -82,25 +82,38 @@ class RealtimeVoiceAssistant {
 
             this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
             const source = this.audioContext.createMediaStreamSource(stream);
-            const processor = this.audioContext.createScriptProcessor(4096, 1, 1);
 
-            source.connect(processor);
-            processor.connect(this.audioContext.destination);
+            this.processor = this.audioContext.createScriptProcessor(4096, 1, 1);
 
-            processor.onaudioprocess = (e) => {
+            source.connect(this.processor);
+            this.processor.connect(this.audioContext.destination);
+
+            this.processor.onaudioprocess = (e) => {
                 if (!this.isRecording) return;
-                
+
                 const inputData = e.inputBuffer.getChannelData(0);
+                // Logging for debugging
+                if (inputData.length && inputData.some(val => val !== 0)) {
+                    console.log('Audio samples:', inputData.slice(0, 10));
+                }
+
                 const pcm16 = new Int16Array(inputData.length);
                 for (let i = 0; i < inputData.length; i++) {
-                    pcm16[i] = inputData[i] * 32767;
+                    let s = Math.max(-1, Math.min(1, inputData[i]));
+                    pcm16[i] = s < 0 ? s * 32768 : s * 32767;
                 }
-                
+
                 const base64Audio = btoa(String.fromCharCode(...new Uint8Array(pcm16.buffer)));
-                this.websocket.send(JSON.stringify({
-                    type: "audio_data",
-                    audio: base64Audio
-                }));
+                if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
+                    // Debug log
+                    console.log('Sending audio chunk:', pcm16.length);
+                    this.websocket.send(JSON.stringify({
+                        type: "audio_data",
+                        audio: base64Audio
+                    }));
+                } else {
+                    console.error('WebSocket not open! State:', this.websocket?.readyState);
+                }
             };
 
             // Visualization
@@ -123,7 +136,7 @@ class RealtimeVoiceAssistant {
 
         const draw = () => {
             analyser.getByteFrequencyData(dataArray);
-            
+
             this.canvasCtx.fillStyle = 'rgb(18, 18, 18)';
             this.canvasCtx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
@@ -163,14 +176,17 @@ class RealtimeVoiceAssistant {
     }
 
     async playAudio(base64Audio) {
+        // Play audio as received (assumed MP3 or WAV)
         const audioBlob = base64ToBlob(base64Audio, 'audio/mpeg');
         const arrayBuffer = await audioBlob.arrayBuffer();
-        
+
         this.audioContext.decodeAudioData(arrayBuffer, (buffer) => {
             const source = this.audioContext.createBufferSource();
             source.buffer = buffer;
             source.connect(this.audioContext.destination);
             source.start(0);
+        }, (err) => {
+            console.error("Audio decode error:", err);
         });
     }
 
@@ -206,6 +222,10 @@ class RealtimeVoiceAssistant {
             this.audioContext.close();
             this.audioContext = null;
         }
+        if (this.processor) {
+            this.processor.disconnect();
+            this.processor = null;
+        }
     }
 }
 
@@ -222,6 +242,7 @@ function base64ToBlob(base64, mimeType) {
 document.addEventListener('DOMContentLoaded', () => {
     new RealtimeVoiceAssistant();
 });
+
 
 
 
