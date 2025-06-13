@@ -1,4 +1,3 @@
-<!-- index.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -10,7 +9,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <button id="recordBtn">🚀 Start Chat</button>
+            <button id="startBtn">🚀 Start Chat</button>
             <div id="status">Disconnected</div>
         </div>
         
@@ -18,10 +17,12 @@
             <div id="chatHistory" class="chat-history"></div>
             <canvas id="audioVisualization"></canvas>
         </div>
+        <audio id="responseAudio" hidden></audio>
     </div>
     <script src="/static/script.js"></script>
 </body>
 </html>
+
 
 
 
