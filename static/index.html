@@ -3,25 +3,39 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Voice Assistant</title>
+    <title>🎤 Voice Assistant</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
     <div class="container">
-        <div class="header">
-            <button id="startBtn">🚀 Start Chat</button>
-            <div id="status">Disconnected</div>
-        </div>
-        
-        <div class="content">
+        <header>
+            <h1>🎙️ AI Voice Assistant</h1>
+            <p>Click once to start speaking. It will stop automatically when you're done.</p>
+        </header>
+
+        <div class="chat-container">
             <div id="chatHistory" class="chat-history"></div>
-            <canvas id="audioVisualization"></canvas>
         </div>
-        <audio id="responseAudio" hidden></audio>
+
+        <div class="controls">
+            <button id="recordBtn" class="record-btn">
+                <span class="btn-text">🎤 Click to Talk</span>
+                <div class="pulse-ring"></div>
+            </button>
+            <div id="status" class="status">Ready to listen...</div>
+        </div>
+
+        <div class="audio-player">
+            <audio id="responseAudio" controls style="display: none;"></audio>
+        </div>
     </div>
+
+    <!-- Load mic-vad -->
+    <script src="https://cdn.jsdelivr.net/npm/mic-vad/dist/mic-vad.min.js"></script>
     <script src="/static/script.js"></script>
 </body>
 </html>
+
 
 
 
