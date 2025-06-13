@@ -177,15 +177,20 @@ class RealtimeVoiceAssistant {
             }
 
             const pcm16 = new Int16Array(bytes.buffer);
+            const float32 = new Float32Array(pcm16.length);
 
-            const mp3Encoder = new lamejs.Mp3Encoder(1, 16000, 128); // mono, 16kHz, 128kbps
-            const mp3Data = mp3Encoder.encodeBuffer(pcm16);
-            const mp3End = mp3Encoder.flush();
-            const mp3Blob = new Blob([new Uint8Array([...mp3Data, ...mp3End])], { type: 'audio/mp3' });
+             for (let i = 0; i < pcm16.length; i++) {
+                 float32[i] = pcm16[i] / 32768;
+            }
 
-            const url = URL.createObjectURL(mp3Blob);
-            const audio = new Audio(url);
-            audio.play();
+            const audioBuffer = this.audioContext.createBuffer(1, float32.length, 16000);
+            audioBuffer.copyToChannel(float32, 0);
+            
+            const source = this.audioContext.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(this.audioContext.destination);
+            source.start();
+
 
         } catch (error) {
             console.error('Audio playback error:', error);
