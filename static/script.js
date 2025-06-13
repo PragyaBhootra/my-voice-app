@@ -1,3 +1,4 @@
+// script.js
 class RealtimeVoiceAssistant {
     constructor() {
         this.websocket = null;
@@ -14,6 +15,12 @@ class RealtimeVoiceAssistant {
         this.canvasCtx = this.canvas.getContext('2d');
 
         this.initializeEventListeners();
+        this.setupCanvas();
+    }
+
+    setupCanvas() {
+        this.canvas.width = window.innerWidth * 0.8;
+        this.canvas.height = 100;
     }
 
     initializeEventListeners() {
@@ -47,7 +54,7 @@ class RealtimeVoiceAssistant {
 
             this.websocket.onclose = () => {
                 this.isConnected = false;
-                this.startBtn.textContent = "🚀 Start Realtime Chat";
+                this.startBtn.textContent = "🚀 Start Chat";
                 this.statusEl.textContent = "Disconnected";
                 this.cleanupAudio();
             };
@@ -74,45 +81,27 @@ class RealtimeVoiceAssistant {
             });
 
             this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-
             const source = this.audioContext.createMediaStreamSource(stream);
+            const processor = this.audioContext.createScriptProcessor(4096, 1, 1);
 
-            await this.audioContext.audioWorklet.addModule(URL.createObjectURL(new Blob([`
-                class PCMProcessor extends AudioWorkletProcessor {
-                    process(inputs) {
-                        const input = inputs[0];
-                        if (input.length > 0) {
-                            const channel = input[0];
-                            const int16 = new Int16Array(channel.length);
-                            for (let i = 0; i < channel.length; i++) {
-                                let s = Math.max(-1, Math.min(1, channel[i]));
-                                int16[i] = s < 0 ? s * 32768 : s * 32767;
-                            }
-                            this.port.postMessage(int16.buffer, [int16.buffer]);
-                        }
-                        return true;
-                    }
+            source.connect(processor);
+            processor.connect(this.audioContext.destination);
+
+            processor.onaudioprocess = (e) => {
+                if (!this.isRecording) return;
+                
+                const inputData = e.inputBuffer.getChannelData(0);
+                const pcm16 = new Int16Array(inputData.length);
+                for (let i = 0; i < inputData.length; i++) {
+                    pcm16[i] = inputData[i] * 32767;
                 }
-                registerProcessor('pcm-processor', PCMProcessor);
-            `], { type: 'application/javascript' })));
-
-            const pcmNode = new AudioWorkletNode(this.audioContext, 'pcm-processor');
-            pcmNode.port.onmessage = (event) => {
-                const int16Buffer = event.data;
-                const byteArray = new Uint8Array(int16Buffer);
-                const binary = String.fromCharCode(...byteArray);
-                const base64Audio = btoa(binary);
-
-                if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
-                    this.websocket.send(JSON.stringify({
-                        type: "audio_data",
-                        audio: base64Audio
-                    }));
-                }
+                
+                const base64Audio = btoa(String.fromCharCode(...new Uint8Array(pcm16.buffer)));
+                this.websocket.send(JSON.stringify({
+                    type: "audio_data",
+                    audio: base64Audio
+                }));
             };
-
-            // Only connect the source to the PCM processor (no direct output to speakers)
-            source.connect(pcmNode);
 
             // Visualization
             const analyser = this.audioContext.createAnalyser();
@@ -129,41 +118,32 @@ class RealtimeVoiceAssistant {
     }
 
     visualizeAudio(analyser) {
-        const bufferLength = analyser.fftSize;
+        const bufferLength = analyser.frequencyBinCount;
         const dataArray = new Uint8Array(bufferLength);
 
         const draw = () => {
-            analyser.getByteTimeDomainData(dataArray);
-            this.canvasCtx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-            this.canvasCtx.strokeStyle = '#00ffff';
-            this.canvasCtx.lineWidth = 2;
-            this.canvasCtx.beginPath();
+            analyser.getByteFrequencyData(dataArray);
+            
+            this.canvasCtx.fillStyle = 'rgb(18, 18, 18)';
+            this.canvasCtx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
-            const sliceWidth = this.canvas.width / bufferLength;
+            const barWidth = (this.canvas.width / bufferLength) * 2.5;
             let x = 0;
+
             for (let i = 0; i < bufferLength; i++) {
-                const v = dataArray[i] / 128.0;
-                const y = this.canvas.height / 2 + v * this.canvas.height / 4;
-                if (i === 0) {
-                    this.canvasCtx.moveTo(x, y);
-                } else {
-                    this.canvasCtx.lineTo(x, y);
-                }
-                x += sliceWidth;
+                const barHeight = dataArray[i] / 2;
+                this.canvasCtx.fillStyle = `rgb(0, ${barHeight + 100}, 255)`;
+                this.canvasCtx.fillRect(x, this.canvas.height - barHeight, barWidth, barHeight);
+                x += barWidth + 1;
             }
-            this.canvasCtx.stroke();
+
             requestAnimationFrame(draw);
         };
         draw();
     }
 
     handleRealtimeEvent(event) {
-        console.log('Received event:', event.type);
-
         switch (event.type) {
-            case 'session.created':
-                this.addMessage("Session started successfully", "system");
-                break;
             case 'conversation.item.input_audio_transcription.completed':
                 this.addMessage(event.transcript, "user");
                 break;
@@ -171,7 +151,7 @@ class RealtimeVoiceAssistant {
                 this.appendToLastMessage(event.delta, "ai");
                 break;
             case 'response.audio.delta':
-                this.bufferAndPlayPCM16(event.delta);
+                this.playAudio(event.delta);
                 break;
             case 'response.done':
                 this.statusEl.textContent = "🎤 Listening... (speak naturally)";
@@ -182,61 +162,16 @@ class RealtimeVoiceAssistant {
         }
     }
 
-    // Resample PCM16 audio from 16kHz to audioContext.sampleRate for correct speed
-    async bufferAndPlayPCM16(base64Audio) {
-        const binaryString = atob(base64Audio);
-        const bytes = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-            bytes[i] = binaryString.charCodeAt(i);
-        }
-        const pcm16 = new Int16Array(bytes.buffer);
-        const float32 = new Float32Array(pcm16.length);
-        for (let i = 0; i < pcm16.length; i++) {
-            float32[i] = Math.max(-1.0, Math.min(pcm16[i] / 32768, 1.0));
-        }
-        // Resample if needed
-        const fromSampleRate = 16000; // incoming audio sample rate
-        const toSampleRate = this.audioContext.sampleRate;
-        let resampled;
-        if (fromSampleRate !== toSampleRate) {
-            resampled = await this.resampleFloat32(float32, fromSampleRate, toSampleRate);
-        } else {
-            resampled = float32;
-        }
-        const audioBuffer = this.audioContext.createBuffer(1, resampled.length, toSampleRate);
-        audioBuffer.copyToChannel(resampled, 0);
-        this.audioQueue.push(audioBuffer);
-        if (!this.isPlaying) this.playAudioQueue();
-    }
-
-    // Simple linear interpolation resampler for Float32Array
-    async resampleFloat32(float32, fromSampleRate, toSampleRate) {
-        if (fromSampleRate === toSampleRate) return float32;
-        const ratio = toSampleRate / fromSampleRate;
-        const newLength = Math.round(float32.length * ratio);
-        const resampled = new Float32Array(newLength);
-        for (let i = 0; i < newLength; i++) {
-            const origIdx = i / ratio;
-            const idx0 = Math.floor(origIdx);
-            const idx1 = Math.min(idx0 + 1, float32.length - 1);
-            const frac = origIdx - idx0;
-            resampled[i] = float32[idx0] * (1 - frac) + float32[idx1] * frac;
-        }
-        return resampled;
-    }
-
-    playAudioQueue() {
-        if (this.audioQueue.length === 0) {
-            this.isPlaying = false;
-            return;
-        }
-        this.isPlaying = true;
-        const buffer = this.audioQueue.shift();
-        const source = this.audioContext.createBufferSource();
-        source.buffer = buffer;
-        source.connect(this.audioContext.destination);
-        source.start();
-        source.onended = () => this.playAudioQueue();
+    async playAudio(base64Audio) {
+        const audioBlob = base64ToBlob(base64Audio, 'audio/mpeg');
+        const arrayBuffer = await audioBlob.arrayBuffer();
+        
+        this.audioContext.decodeAudioData(arrayBuffer, (buffer) => {
+            const source = this.audioContext.createBufferSource();
+            source.buffer = buffer;
+            source.connect(this.audioContext.destination);
+            source.start(0);
+        });
     }
 
     addMessage(text, sender) {
@@ -271,14 +206,23 @@ class RealtimeVoiceAssistant {
             this.audioContext.close();
             this.audioContext = null;
         }
-        this.audioQueue = [];
-        this.isPlaying = false;
     }
+}
+
+function base64ToBlob(base64, mimeType) {
+    const byteCharacters = atob(base64);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    return new Blob([byteArray], { type: mimeType });
 }
 
 document.addEventListener('DOMContentLoaded', () => {
     new RealtimeVoiceAssistant();
 });
+
 
 
 
