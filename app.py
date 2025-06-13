@@ -74,7 +74,7 @@ async def chat_with_gpt(request: ChatRequest):
 async def text_to_speech(request: ChatRequest):
     try:
         speech_response = client.audio.speech.create(
-            model="tts-1",
+            model="tts-1-hd",
             voice="nova",
             input=request.message
         )
