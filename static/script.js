@@ -2,6 +2,7 @@ class RealtimeVoiceAssistant {
     constructor() {
         this.websocket = null;
         this.audioContext = null;
+        this.outputGain = null;
         this.isConnected = false;
         this.isRecording = false;
         this.audioQueue = [];
@@ -56,7 +57,6 @@ class RealtimeVoiceAssistant {
                 console.error('WebSocket error:', error);
                 this.statusEl.textContent = "Connection error";
             };
-
         } catch (error) {
             console.error('Connection failed:', error);
             this.statusEl.textContent = "Failed to connect";
@@ -78,49 +78,64 @@ class RealtimeVoiceAssistant {
                 sampleRate: 16000
             });
 
-            const source = this.audioContext.createMediaStreamSource(stream);
+            const processorCode = `
+                class PCMProcessor extends AudioWorkletProcessor {
+                    process(inputs) {
+                        const input = inputs[0];
+                        if (input.length > 0) {
+                            const channel = input[0];
+                            const int16 = new Int16Array(channel.length);
+                            for (let i = 0; i < channel.length; i++) {
+                                let s = Math.max(-1, Math.min(1, channel[i]));
+                                int16[i] = s < 0 ? s * 32768 : s * 32767;
+                            }
+                            const base64 = btoa(String.fromCharCode(...new Uint8Array(int16.buffer)));
+                            this.port.postMessage(base64);
+                        }
+                        return true;
+                    }
+                }
+                registerProcessor('pcm-processor', PCMProcessor);
+            `;
+            const blob = new Blob([processorCode], { type: 'application/javascript' });
+            const workletURL = URL.createObjectURL(blob);
+            await this.audioContext.audioWorklet.addModule(workletURL);
 
-            const analyser = this.audioContext.createAnalyser();
-            analyser.fftSize = 2048;
-            source.connect(analyser);
-            this.visualizeAudio(analyser);
+            const source = this.audioContext.createMediaStreamSource(stream);
+            const pcmNode = new AudioWorkletNode(this.audioContext, 'pcm-processor');
+
+            source.connect(pcmNode);
+
+            pcmNode.port.onmessage = (event) => {
+                const base64Audio = event.data;
+                if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
+                    this.websocket.send(JSON.stringify({
+                        type: "audio_data",
+                        audio: base64Audio
+                    }));
+                }
+            };
+
+            // Optional volume boost
+            this.outputGain = this.audioContext.createGain();
+            this.outputGain.gain.value = 1.5;
+            pcmNode.connect(this.outputGain).connect(this.audioContext.destination);
+
+            this.visualizeAudio(this.audioContext.createAnalyser(), source);
 
             this.isRecording = true;
             this.statusEl.textContent = "🎤 Listening... (speak naturally)";
-            this.sendAudioChunks(source);
-
         } catch (error) {
             console.error('Audio setup failed:', error);
             this.statusEl.textContent = "Microphone access required";
         }
     }
 
-    sendAudioChunks(source) {
-        const processor = this.audioContext.createScriptProcessor(4096, 1, 1);
-        source.connect(processor);
-        processor.connect(this.audioContext.destination);
-
-        processor.onaudioprocess = (event) => {
-            if (this.isRecording && this.websocket && this.websocket.readyState === WebSocket.OPEN) {
-                const audioData = event.inputBuffer.getChannelData(0);
-                const int16Array = new Int16Array(audioData.length);
-                for (let i = 0; i < audioData.length; i++) {
-                    // Clamp and convert to PCM16
-                    let s = Math.max(-1, Math.min(1, audioData[i]));
-                    int16Array[i] = s < 0 ? s * 32768 : s * 32767;
-                }
-                const base64Audio = btoa(String.fromCharCode(...new Uint8Array(int16Array.buffer)));
-                this.websocket.send(JSON.stringify({
-                    type: "audio_data",
-                    audio: base64Audio
-                }));
-            }
-        };
-    }
-
-    visualizeAudio(analyser) {
+    visualizeAudio(analyser, source) {
+        analyser.fftSize = 2048;
         const bufferLength = analyser.fftSize;
         const dataArray = new Uint8Array(bufferLength);
+        source.connect(analyser);
 
         const draw = () => {
             analyser.getByteTimeDomainData(dataArray);
@@ -173,19 +188,16 @@ class RealtimeVoiceAssistant {
     }
 
     bufferAndPlayPCM16(base64Audio) {
-        // Decode base64 to PCM16
         const binaryString = atob(base64Audio);
         const bytes = new Uint8Array(binaryString.length);
         for (let i = 0; i < binaryString.length; i++) {
             bytes[i] = binaryString.charCodeAt(i);
         }
         const pcm16 = new Int16Array(bytes.buffer);
-        // Convert PCM16 to Float32 [-1, 1]
         const float32 = new Float32Array(pcm16.length);
         for (let i = 0; i < pcm16.length; i++) {
-            float32[i] = Math.max(-1.0, Math.min(pcm16[i] / 32768, 1.0));
+            float32[i] = pcm16[i] / 32768;
         }
-        // Create AudioBuffer and queue for smooth playback
         const audioBuffer = this.audioContext.createBuffer(1, float32.length, 16000);
         audioBuffer.copyToChannel(float32, 0);
         this.audioQueue.push(audioBuffer);
@@ -201,7 +213,7 @@ class RealtimeVoiceAssistant {
         const buffer = this.audioQueue.shift();
         const source = this.audioContext.createBufferSource();
         source.buffer = buffer;
-        source.connect(this.audioContext.destination);
+        source.connect(this.outputGain || this.audioContext.destination);
         source.start();
         source.onended = () => this.playAudioQueue();
     }
@@ -243,10 +255,10 @@ class RealtimeVoiceAssistant {
     }
 }
 
-// Initialize when page loads
 document.addEventListener('DOMContentLoaded', () => {
     new RealtimeVoiceAssistant();
 });
+
 
 
 
