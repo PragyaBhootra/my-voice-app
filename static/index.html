@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🎤 Voice Assistant</title>
+    <title>🎤 Realtime Voice Assistant</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>🎙️ AI Voice Assistant</h1>
-            <p>Click once to start speaking. It will stop automatically when you're done.</p>
+            <h1>🎙️ Realtime AI Assistant</h1>
+            <p>Real-time conversation with GPT-4o</p>
         </header>
 
         <div class="chat-container">
@@ -18,20 +18,17 @@
         </div>
 
         <div class="controls">
-            <button id="recordBtn" class="record-btn">
-                <span class="btn-text">🎤 Click to Talk</span>
-                <div class="pulse-ring"></div>
+            <button id="startBtn" class="start-btn">
+                <span class="btn-text">🚀 Start Realtime Chat</span>
             </button>
-            <div id="status" class="status">Ready to listen...</div>
+            <div id="status" class="status">Click start to begin</div>
         </div>
 
-        <div class="audio-player">
-            <audio id="responseAudio" controls style="display: none;"></audio>
+        <div class="audio-controls">
+            <canvas id="audioVisualization" width="400" height="100"></canvas>
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@latest/dist/bundle.min.js"></script>
     <script src="/static/script.js"></script>
 </body>
 </html>
