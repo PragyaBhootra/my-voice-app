@@ -13,7 +13,7 @@ app.config['SECRET_KEY'] = 'your-secret-key'
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Get OpenAI API key from environment variable
-OPENAI_API_KEY = os.getenv('OPEN_API_KEY')
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 
 if not OPENAI_API_KEY:
     raise ValueError("OPEN_API_KEY environment variable is required")
