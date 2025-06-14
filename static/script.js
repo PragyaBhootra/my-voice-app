@@ -65,16 +65,13 @@ class RealtimeVoiceAssistant {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({
                 audio: {
-                    sampleRate: 48000,
                     channelCount: 1,
                     echoCancellation: true,
                     noiseSuppression: true
                 }
             });
 
-            this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
-                sampleRate: 48000
-            });
+            this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
 
             const source = this.audioContext.createMediaStreamSource(stream);
 
@@ -183,7 +180,7 @@ class RealtimeVoiceAssistant {
                  float32[i] = pcm16[i] / 32768;
             }
 
-            const audioBuffer = this.audioContext.createBuffer(1, float32.length, 48000);
+            const audioBuffer = this.audioContext.createBuffer(1, float32.length, 24000);
             audioBuffer.copyToChannel(float32, 0);
             
             const source = this.audioContext.createBufferSource();
