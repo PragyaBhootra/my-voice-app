@@ -182,7 +182,7 @@ class RealtimeVoiceAssistant {
         }
     }
 
-    bufferAndPlayPCM16(base64Audio) {
+    async bufferAndPlayPCM16(base64Audio) {
         const binaryString = atob(base64Audio);
         const bytes = new Uint8Array(binaryString.length);
         for (let i = 0; i < binaryString.length; i++) {
@@ -197,9 +197,9 @@ class RealtimeVoiceAssistant {
         const sampleRate = 16000;
         const targetSampleRate = this.audioContext.sampleRate;
         //const audioBuffer = this.audioContext.createBuffer(1, float32.length, sampleRate);
-        if (originalSampleRate !== targetSampleRate) {
-            const tempCtx = new OfflineAudioContext(1, float32.length * targetSampleRate / originalSampleRate, targetSampleRate);
-            const buffer = tempCtx.createBuffer(1, float32.length, originalSampleRate);
+        if (sampleRate !== targetSampleRate) {
+            const tempCtx = new OfflineAudioContext(1, float32.length * targetSampleRate / sampleRate, targetSampleRate);
+            const buffer = tempCtx.createBuffer(1, float32.length, sampleRate);
             buffer.copyToChannel(float32, 0);
 
             const source = tempCtx.createBufferSource();
@@ -209,7 +209,7 @@ class RealtimeVoiceAssistant {
             const resampledBuffer = await tempCtx.startRendering()
             this.audioQueue.push(resampledBuffer);
         }else {
-            const audioBuffer = this.audioContext.createBuffer(1, float32.length, originalSampleRate);
+            const audioBuffer = this.audioContext.createBuffer(1, float32.length, sampleRate);
             audioBuffer.copyToChannel(float32, 0);
             this.audioQueue.push(audioBuffer);
         }
@@ -270,6 +270,7 @@ class RealtimeVoiceAssistant {
 document.addEventListener('DOMContentLoaded', () => {
     new RealtimeVoiceAssistant();
 });
+
 
 
 
