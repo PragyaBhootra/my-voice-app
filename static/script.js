@@ -65,7 +65,7 @@ class RealtimeVoiceAssistant {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({
                 audio: {
-                    sampleRate: 16000,
+                    sampleRate: 24000,
                     channelCount: 1,
                     echoCancellation: true,
                     noiseSuppression: true
@@ -73,7 +73,7 @@ class RealtimeVoiceAssistant {
             });
 
             this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
-                sampleRate: 16000
+                sampleRate: 24000
             });
 
             const source = this.audioContext.createMediaStreamSource(stream);
