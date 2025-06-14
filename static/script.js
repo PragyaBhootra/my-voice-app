@@ -65,7 +65,7 @@ class RealtimeVoiceAssistant {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({
                 audio: {
-                    sampleRate: 24000,
+                    sampleRate: 48000,
                     channelCount: 1,
                     echoCancellation: true,
                     noiseSuppression: true
@@ -73,7 +73,7 @@ class RealtimeVoiceAssistant {
             });
 
             this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
-                sampleRate: 24000
+                sampleRate: 48000
             });
 
             const source = this.audioContext.createMediaStreamSource(stream);
@@ -96,7 +96,7 @@ class RealtimeVoiceAssistant {
     sendAudioChunks(source) {
         const processor = this.audioContext.createScriptProcessor(4096, 1, 1);
         source.connect(processor);
-        //processor.connect(this.audioContext.destination);
+        processor.connect(this.audioContext.destination);
 
         processor.onaudioprocess = (event) => {
             if (this.isRecording && this.websocket && this.websocket.readyState === WebSocket.OPEN) {
@@ -183,7 +183,7 @@ class RealtimeVoiceAssistant {
                  float32[i] = pcm16[i] / 32768;
             }
 
-            const audioBuffer = this.audioContext.createBuffer(1, float32.length, 24000);
+            const audioBuffer = this.audioContext.createBuffer(1, float32.length, 48000);
             audioBuffer.copyToChannel(float32, 0);
             
             const source = this.audioContext.createBufferSource();
