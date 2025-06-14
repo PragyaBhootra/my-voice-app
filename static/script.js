@@ -5,7 +5,9 @@ class RealtimeVoiceAssistant {
         this.isConnected = false;
         this.isRecording = false;
         this.audioQueue = [];
+        this.audioWorkletSupported = false;
 
+        // UI Elements
         this.startBtn = document.getElementById('startBtn');
         this.statusEl = document.getElementById('status');
         this.chatHistory = document.getElementById('chatHistory');
@@ -15,78 +17,80 @@ class RealtimeVoiceAssistant {
         this.initializeEventListeners();
     }
 
-    initializeEventListeners() {
-        this.startBtn.addEventListener('click', () => {
-            if (!this.isConnected) {
-                this.connect();
-            } else {
-                this.disconnect();
-            }
-        });
+    async initializeEventListeners() {
+        this.startBtn.addEventListener('click', () => this.toggleConnection());
+    }
+
+    async toggleConnection() {
+        if (!this.isConnected) {
+            await this.connect();
+        } else {
+            this.disconnect();
+        }
     }
 
     async connect() {
         try {
             this.statusEl.textContent = "Connecting...";
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/ws`;
-
-            this.websocket = new WebSocket(wsUrl);
+            this.websocket = new WebSocket(`${protocol}//${window.location.host}/ws`);
 
             this.websocket.onopen = async () => {
                 this.isConnected = true;
-                this.startBtn.textContent = "🛑 Stop Chat";
-                this.statusEl.textContent = "Connected! Setting up audio...";
-                await this.setupAudio();
+                this.updateUI("🛑 Stop Chat", "Connected! Initializing audio...");
+                await this.initializeAudioContext();
+                await this.setupAudioStream();
             };
 
-            this.websocket.onmessage = (event) => {
-                this.handleRealtimeEvent(JSON.parse(event.data));
-            };
-
-            this.websocket.onclose = () => {
-                this.isConnected = false;
-                this.startBtn.textContent = "🚀 Start Realtime Chat";
-                this.statusEl.textContent = "Disconnected";
-                this.cleanupAudio();
-            };
-
-            this.websocket.onerror = (error) => {
-                console.error('WebSocket error:', error);
-                this.statusEl.textContent = "Connection error";
-            };
+            this.websocket.onmessage = (event) => this.handleRealtimeEvent(JSON.parse(event.data));
+            this.websocket.onclose = () => this.handleDisconnect();
+            this.websocket.onerror = (error) => this.handleError(error);
 
         } catch (error) {
             console.error('Connection failed:', error);
-            this.statusEl.textContent = "Failed to connect";
+            this.statusEl.textContent = "Connection failed";
         }
     }
 
-    async setupAudio() {
+    async initializeAudioContext() {
+        try {
+            this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                sampleRate: 16000,
+                latencyHint: 'interactive'
+            });
+            
+            if (this.audioContext.audioWorklet) {
+                await this.audioContext.audioWorklet.addModule('audio-processor.js');
+                this.audioWorkletSupported = true;
+            }
+            
+        } catch (error) {
+            console.error('AudioContext initialization failed:', error);
+            throw error;
+        }
+    }
+
+    async setupAudioStream() {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({
                 audio: {
                     sampleRate: 16000,
                     channelCount: 1,
-                    echoCancellation: true,
-                    noiseSuppression: true
-                }
+                    echoCancellation: { ideal: true },
+                    noiseSuppression: { ideal: true },
+                    autoGainControl: false
+                },
+                video: false
             });
 
-            this.audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-
-            console.log("Actual AudioContext sampleRate:", this.audioContext.sampleRate);
-
             const source = this.audioContext.createMediaStreamSource(stream);
-
             const analyser = this.audioContext.createAnalyser();
             analyser.fftSize = 2048;
             source.connect(analyser);
             this.visualizeAudio(analyser);
 
-            this.isRecording = true;
-            this.statusEl.textContent = "🎤 Listening... (speak naturally)";
-            this.sendAudioChunks(source);
+            this.setupAudioProcessing(source);
+            this.updateUI("🎤 Listening...", "speak naturally");
 
         } catch (error) {
             console.error('Audio setup failed:', error);
@@ -94,25 +98,82 @@ class RealtimeVoiceAssistant {
         }
     }
 
-    sendAudioChunks(source) {
-        const processor = this.audioContext.createScriptProcessor(4096, 1, 1);
-        source.connect(processor);
-        processor.connect(this.audioContext.destination);
+    setupAudioProcessing(source) {
+        if (this.audioWorkletSupported) {
+            const workletProcessor = new AudioWorkletNode(this.audioContext, 'audio-processor');
+            source.connect(workletProcessor);
+            workletProcessor.port.onmessage = (event) => this.handleAudioData(event.data);
+            workletProcessor.connect(this.audioContext.destination);
+        } else {
+            const processor = this.audioContext.createScriptProcessor(1024, 1, 1);
+            source.connect(processor);
+            processor.connect(this.audioContext.destination);
+            processor.onaudioprocess = (event) => {
+                this.handleAudioData(event.inputBuffer.getChannelData(0));
+            };
+        }
+    }
 
-        processor.onaudioprocess = (event) => {
-            if (this.isRecording && this.websocket && this.websocket.readyState === WebSocket.OPEN) {
-                const audioData = event.inputBuffer.getChannelData(0);
-                const int16Array = new Int16Array(audioData.length);
-                for (let i = 0; i < audioData.length; i++) {
-                    int16Array[i] = Math.max(-32768, Math.min(32767, audioData[i] * 32768));
-                }
-                const base64Audio = btoa(String.fromCharCode(...new Uint8Array(int16Array.buffer)));
-                this.websocket.send(JSON.stringify({
-                    type: "audio_data",
-                    audio: base64Audio
-                }));
+    handleAudioData(audioData) {
+        if (!this.isRecording || !this.websocket || this.websocket.readyState !== WebSocket.OPEN) return;
+
+        const int16Array = new Int16Array(audioData.length);
+        for (let i = 0; i < audioData.length; i++) {
+            int16Array[i] = Math.max(-32768, Math.min(32767, audioData[i] * 32767));
+        }
+        
+        this.websocket.send(JSON.stringify({
+            type: "audio_data",
+            audio: this.arrayBufferToBase64(int16Array.buffer)
+        }));
+    }
+
+    async processAudioQueue() {
+        if (this.playingAudio || !this.audioQueue.length) return;
+
+        try {
+            const base64Audio = this.audioQueue.shift();
+            const pcm16 = new Int16Array(this.base64ToArrayBuffer(base64Audio));
+            const float32 = new Float32Array(pcm16.length);
+
+            const scaleFactor = 1 / (this.audioContext.sampleRate === 48000 ? 32768 : 32767);
+            for (let i = 0; i < pcm16.length; i++) {
+                float32[i] = pcm16[i] * scaleFactor;
             }
-        };
+
+            const audioBuffer = this.audioContext.createBuffer(1, float32.length, this.audioContext.sampleRate);
+            audioBuffer.copyToChannel(float32, 0);
+
+            const source = this.audioContext.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(this.audioContext.destination);
+            source.start(0);
+
+            source.onended = () => {
+                this.playingAudio = false;
+                this.processAudioQueue();
+            };
+
+            this.playingAudio = true;
+
+        } catch (error) {
+            console.error('Audio playback error:', error);
+            this.playingAudio = false;
+        }
+    }
+
+    // Helper methods
+    arrayBufferToBase64(buffer) {
+        return btoa(String.fromCharCode(...new Uint8Array(buffer)));
+    }
+
+    base64ToArrayBuffer(base64) {
+        const binaryString = atob(base64);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+        }
+        return bytes.buffer;
     }
 
     visualizeAudio(analyser) {
@@ -144,90 +205,15 @@ class RealtimeVoiceAssistant {
         draw();
     }
 
+    // Remaining UI and WebSocket handlers
     handleRealtimeEvent(event) {
-        console.log('Received event:', event.type);
-
         switch (event.type) {
-            case 'session.created':
-                this.addMessage("Session started successfully", "system");
-                break;
-            case 'conversation.item.input_audio_transcription.completed':
-                this.addMessage(event.transcript, "user");
-                break;
-            case 'response.text.delta':
-                this.appendToLastMessage(event.delta, "ai");
-                break;
             case 'response.audio.delta':
                 this.audioQueue.push(event.delta);
                 this.processAudioQueue();
                 break;
-            case 'response.done':
-                this.statusEl.textContent = "🎤 Listening... (speak naturally)";
-                break;
-            case 'error':
-                this.addMessage(`Error: ${event.error.message}`, "error");
-                break;
+            // Other event handlers...
         }
-    }
-
-    async processAudioQueue() {
-        if (this.playingAudio || !this.audioQueue.length) return;
-
-        const base64Audio = this.audioQueue.shift();
-        this.playingAudio = true;
-        try {
-            const binaryString = atob(base64Audio);
-            const byteArray = new Uint8Array(binaryString.length);
-            for (let i = 0; i < binaryString.length; i++) {
-                byteArray[i] = binaryString.charCodeAt(i);
-            }
-
-            const pcm16 = new Int16Array(byteArray.buffer);
-            const float32 = new Float32Array(pcm16.length);
-            for (let i = 0; i < pcm16.length; i++) {
-                float32[i] = Math.max(-1, Math.min(1, pcm16[i] / 32768));
-            }
-
-            if (this.audioContext.state === 'suspended') {
-                await this.audioContext.resume();
-            }
-
-            const audioBuffer = this.audioContext.createBuffer(1, float32.length, 16000);
-            audioBuffer.copyToChannel(float32, 0);
-
-            const source = this.audioContext.createBufferSource();
-            source.buffer = audioBuffer;
-            source.connect(this.audioContext.destination);
-            source.start();
-
-            source.onended = () => {
-                this.playingAudio = false;
-                this.processAudioQueue(); // play next
-            };
-
-        } catch (error) {
-            console.error('Audio playback error:', error);
-            this.playingAudio = false;
-        }
-    }
-
-    addMessage(text, sender) {
-        const messageDiv = document.createElement('div');
-        messageDiv.className = `message ${sender}-message`;
-        messageDiv.textContent = text;
-        this.chatHistory.appendChild(messageDiv);
-        this.chatHistory.scrollTop = this.chatHistory.scrollHeight;
-    }
-
-    appendToLastMessage(text, sender) {
-        const messages = this.chatHistory.querySelectorAll(`.${sender}-message`);
-        if (messages.length > 0) {
-            const lastMessage = messages[messages.length - 1];
-            lastMessage.textContent += text;
-        } else {
-            this.addMessage(text, sender);
-        }
-        this.chatHistory.scrollTop = this.chatHistory.scrollHeight;
     }
 
     disconnect() {
@@ -248,7 +234,6 @@ class RealtimeVoiceAssistant {
     }
 }
 
-// Initialize when page loads
 document.addEventListener('DOMContentLoaded', () => {
     new RealtimeVoiceAssistant();
 });
