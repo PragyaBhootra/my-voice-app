@@ -196,6 +196,7 @@ class RealtimeVoiceAssistant {
         // Use the audio context's sample rate for playback
         const sampleRate = 16000;
         const targetSampleRate = this.audioContext.sampleRate;
+        console.log(`PCM sampleRate: ${sampleRate}, AudioContext sampleRate: ${targetSampleRate}`);
         //const audioBuffer = this.audioContext.createBuffer(1, float32.length, sampleRate);
         if (sampleRate !== targetSampleRate) {
             const tempCtx = new OfflineAudioContext(1, float32.length * targetSampleRate / sampleRate, targetSampleRate);
