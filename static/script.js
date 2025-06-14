@@ -1,201 +1,241 @@
-class VoiceChatApp {
+class RealtimeVoiceAssistant {
     constructor() {
-        this.socket = io();
-        this.mediaRecorder = null;
+        this.websocket = null;
         this.audioContext = null;
-        this.isRecording = false;
         this.isConnected = false;
-        this.audioChunks = [];
-        
-        this.initializeElements();
-        this.initializeSocket();
-        this.initializeAudio();
-    }
+        this.isRecording = false;
 
-    initializeElements() {
         this.startBtn = document.getElementById('startBtn');
-        this.stopBtn = document.getElementById('stopBtn');
-        this.recordBtn = document.getElementById('recordBtn');
-        this.status = document.getElementById('status');
-        this.transcription = document.getElementById('transcription');
-        this.response = document.getElementById('response');
-        
-        this.startBtn.addEventListener('click', () => this.startConversation());
-        this.stopBtn.addEventListener('click', () => this.stopConversation());
-        this.recordBtn.addEventListener('mousedown', () => this.startRecording());
-        this.recordBtn.addEventListener('mouseup', () => this.stopRecording());
-        this.recordBtn.addEventListener('mouseleave', () => this.stopRecording());
-        this.recordBtn.addEventListener('touchstart', () => this.startRecording());
-        this.recordBtn.addEventListener('touchend', () => this.stopRecording());
+        this.statusEl = document.getElementById('status');
+        this.chatHistory = document.getElementById('chatHistory');
+        this.canvas = document.getElementById('audioVisualization');
+        this.canvasCtx = this.canvas.getContext('2d');
+
+        this.initializeEventListeners();
     }
 
-    initializeSocket() {
-        this.socket.on('connected', (data) => {
-            this.updateStatus('Connected to server');
-        });
-
-        this.socket.on('conversation_started', (data) => {
-            this.isConnected = true;
-            this.updateStatus('Conversation started - Hold the record button to speak');
-            this.startBtn.disabled = true;
-            this.stopBtn.disabled = false;
-            this.recordBtn.disabled = false;
-        });
-
-        this.socket.on('conversation_stopped', (data) => {
-            this.isConnected = false;
-            this.updateStatus('Conversation stopped');
-            this.startBtn.disabled = false;
-            this.stopBtn.disabled = true;
-            this.recordBtn.disabled = true;
-        });
-
-        this.socket.on('transcription', (data) => {
-            this.transcription.innerHTML += `<div class="user-message">You: ${data.text}</div>`;
-            this.transcription.scrollTop = this.transcription.scrollHeight;
-        });
-
-        this.socket.on('text_response', (data) => {
-            this.response.innerHTML += data.text;
-            this.response.scrollTop = this.response.scrollHeight;
-        });
-
-        this.socket.on('audio_response', (data) => {
-            this.playAudioResponse(data.audio);
-        });
-
-        this.socket.on('error', (data) => {
-            this.updateStatus(`Error: ${data.message}`);
+    initializeEventListeners() {
+        this.startBtn.addEventListener('click', () => {
+            if (!this.isConnected) {
+                this.connect();
+            } else {
+                this.disconnect();
+            }
         });
     }
 
-    async initializeAudio() {
+    async connect() {
         try {
-            this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            const stream = await navigator.mediaDevices.getUserMedia({ 
+            this.statusEl.textContent = "Connecting...";
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws`;
+
+            this.websocket = new WebSocket(wsUrl);
+
+            this.websocket.onopen = async () => {
+                this.isConnected = true;
+                this.startBtn.textContent = "🛑 Stop Chat";
+                this.statusEl.textContent = "Connected! Setting up audio...";
+                await this.setupAudio();
+            };
+
+            this.websocket.onmessage = (event) => {
+                this.handleRealtimeEvent(JSON.parse(event.data));
+            };
+
+            this.websocket.onclose = () => {
+                this.isConnected = false;
+                this.startBtn.textContent = "🚀 Start Realtime Chat";
+                this.statusEl.textContent = "Disconnected";
+                this.cleanupAudio();
+            };
+
+            this.websocket.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                this.statusEl.textContent = "Connection error";
+            };
+
+        } catch (error) {
+            console.error('Connection failed:', error);
+            this.statusEl.textContent = "Failed to connect";
+        }
+    }
+
+    async setupAudio() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
                 audio: {
                     sampleRate: 16000,
                     channelCount: 1,
                     echoCancellation: true,
                     noiseSuppression: true
-                } 
-            });
-            
-            this.mediaRecorder = new MediaRecorder(stream, {
-                mimeType: 'audio/webm;codecs=opus'
-            });
-            
-            this.mediaRecorder.ondataavailable = (event) => {
-                if (event.data.size > 0) {
-                    this.audioChunks.push(event.data);
                 }
-            };
-            
-            this.mediaRecorder.onstop = () => {
-                this.processAudioData();
-            };
-            
-            this.updateStatus('Microphone access granted');
+            });
+
+            this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                sampleRate: 16000
+            });
+
+            const source = this.audioContext.createMediaStreamSource(stream);
+
+            const analyser = this.audioContext.createAnalyser();
+            analyser.fftSize = 2048;
+            source.connect(analyser);
+            this.visualizeAudio(analyser);
+
+            this.isRecording = true;
+            this.statusEl.textContent = "🎤 Listening... (speak naturally)";
+            this.sendAudioChunks(source);
+
         } catch (error) {
-            this.updateStatus('Microphone access denied');
-            console.error('Error accessing microphone:', error);
+            console.error('Audio setup failed:', error);
+            this.statusEl.textContent = "Microphone access required";
         }
     }
 
-    startConversation() {
-        this.socket.emit('start_conversation');
-        this.updateStatus('Starting conversation...');
+    sendAudioChunks(source) {
+        const processor = this.audioContext.createScriptProcessor(4096, 1, 1);
+        source.connect(processor);
+        processor.connect(this.audioContext.destination);
+
+        processor.onaudioprocess = (event) => {
+            if (this.isRecording && this.websocket && this.websocket.readyState === WebSocket.OPEN) {
+                const audioData = event.inputBuffer.getChannelData(0);
+                const int16Array = new Int16Array(audioData.length);
+                for (let i = 0; i < audioData.length; i++) {
+                    int16Array[i] = Math.max(-32768, Math.min(32767, audioData[i] * 32768));
+                }
+                const base64Audio = btoa(String.fromCharCode(...new Uint8Array(int16Array.buffer)));
+                this.websocket.send(JSON.stringify({
+                    type: "audio_data",
+                    audio: base64Audio
+                }));
+            }
+        };
     }
 
-    stopConversation() {
-        this.socket.emit('stop_conversation');
-        if (this.isRecording) {
-            this.stopRecording();
+    visualizeAudio(analyser) {
+        const bufferLength = analyser.fftSize;
+        const dataArray = new Uint8Array(bufferLength);
+
+        const draw = () => {
+            analyser.getByteTimeDomainData(dataArray);
+            this.canvasCtx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+            this.canvasCtx.strokeStyle = '#00ffff';
+            this.canvasCtx.lineWidth = 2;
+            this.canvasCtx.beginPath();
+
+            const sliceWidth = this.canvas.width / bufferLength;
+            let x = 0;
+            for (let i = 0; i < bufferLength; i++) {
+                const v = dataArray[i] / 128.0;
+                const y = this.canvas.height / 2 + v * this.canvas.height / 4;
+                if (i === 0) {
+                    this.canvasCtx.moveTo(x, y);
+                } else {
+                    this.canvasCtx.lineTo(x, y);
+                }
+                x += sliceWidth;
+            }
+            this.canvasCtx.stroke();
+            requestAnimationFrame(draw);
+        };
+        draw();
+    }
+
+    handleRealtimeEvent(event) {
+        console.log('Received event:', event.type);
+
+        switch (event.type) {
+            case 'session.created':
+                this.addMessage("Session started successfully", "system");
+                break;
+            case 'conversation.item.input_audio_transcription.completed':
+                this.addMessage(event.transcript, "user");
+                break;
+            case 'response.text.delta':
+                this.appendToLastMessage(event.delta, "ai");
+                break;
+            case 'response.audio.delta':
+                this.playAudioDelta(event.delta);
+                break;
+            case 'response.done':
+                this.statusEl.textContent = "🎤 Listening... (speak naturally)";
+                break;
+            case 'error':
+                this.addMessage(`Error: ${event.error.message}`, "error");
+                break;
         }
     }
 
-    startRecording() {
-        if (!this.isConnected || this.isRecording || !this.mediaRecorder) return;
-        
-        this.isRecording = true;
-        this.audioChunks = [];
-        this.recordBtn.classList.add('recording');
-        this.recordBtn.textContent = 'Recording...';
-        this.updateStatus('Listening...');
-        
-        this.mediaRecorder.start(100); // Collect data every 100ms
-    }
-
-    stopRecording() {
-        if (!this.isRecording || !this.mediaRecorder) return;
-        
-        this.isRecording = false;
-        this.recordBtn.classList.remove('recording');
-        this.recordBtn.textContent = 'Hold to Speak';
-        this.updateStatus('Processing...');
-        
-        this.mediaRecorder.stop();
-    }
-
-    async processAudioData() {
-        if (this.audioChunks.length === 0) return;
-        
-        const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm;codecs=opus' });
-        const arrayBuffer = await audioBlob.arrayBuffer();
-        
-        // Convert to PCM16 format
-        const audioData = await this.convertToPCM16(arrayBuffer);
-        const base64Audio = btoa(String.fromCharCode(...audioData));
-        
-        this.socket.emit('audio_data', { audio: base64Audio });
-        this.socket.emit('audio_end');
-        
-        this.audioChunks = [];
-    }
-
-    async convertToPCM16(arrayBuffer) {
-        const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
-        const sampleRate = 16000;
-        const length = Math.floor(audioBuffer.length * sampleRate / audioBuffer.sampleRate);
-        const result = new Int16Array(length);
-        const channelData = audioBuffer.getChannelData(0);
-        
-        for (let i = 0; i < length; i++) {
-            const index = Math.floor(i * audioBuffer.sampleRate / sampleRate);
-            result[i] = Math.max(-32768, Math.min(32767, channelData[index] * 32768));
-        }
-        
-        return new Uint8Array(result.buffer);
-    }
-
-    async playAudioResponse(base64Audio) {
+    playAudioDelta(base64Audio) {
         try {
             const binaryString = atob(base64Audio);
             const bytes = new Uint8Array(binaryString.length);
             for (let i = 0; i < binaryString.length; i++) {
                 bytes[i] = binaryString.charCodeAt(i);
             }
+
+            const pcm16 = new Int16Array(bytes.buffer);
+            const float32 = new Float32Array(pcm16.length);
+
+             for (let i = 0; i < pcm16.length; i++) {
+                 float32[i] = pcm16[i] / 32768;
+            }
+
+            const audioBuffer = this.audioContext.createBuffer(1, float32.length, 16000);
+            audioBuffer.copyToChannel(float32, 0);
             
-            const audioBuffer = await this.audioContext.decodeAudioData(bytes.buffer);
             const source = this.audioContext.createBufferSource();
             source.buffer = audioBuffer;
             source.connect(this.audioContext.destination);
             source.start();
+
+
         } catch (error) {
-            console.error('Error playing audio response:', error);
+            console.error('Audio playback error:', error);
         }
     }
 
-    updateStatus(message) {
-        this.status.textContent = message;
+    addMessage(text, sender) {
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `message ${sender}-message`;
+        messageDiv.textContent = text;
+        this.chatHistory.appendChild(messageDiv);
+        this.chatHistory.scrollTop = this.chatHistory.scrollHeight;
+    }
+
+    appendToLastMessage(text, sender) {
+        const messages = this.chatHistory.querySelectorAll(`.${sender}-message`);
+        if (messages.length > 0) {
+            const lastMessage = messages[messages.length - 1];
+            lastMessage.textContent += text;
+        } else {
+            this.addMessage(text, sender);
+        }
+        this.chatHistory.scrollTop = this.chatHistory.scrollHeight;
+    }
+
+    disconnect() {
+        this.isRecording = false;
+        if (this.websocket) {
+            this.websocket.close();
+        }
+        this.cleanupAudio();
+    }
+
+    cleanupAudio() {
+        if (this.audioContext) {
+            this.audioContext.close();
+            this.audioContext = null;
+        }
     }
 }
 
-// Initialize the app when the page loads
+// Initialize when page loads
 document.addEventListener('DOMContentLoaded', () => {
-    new VoiceChatApp();
+    new RealtimeVoiceAssistant();
 });
-
 
 
 
