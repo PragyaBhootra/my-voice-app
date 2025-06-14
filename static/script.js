@@ -96,7 +96,7 @@ class RealtimeVoiceAssistant {
     sendAudioChunks(source) {
         const processor = this.audioContext.createScriptProcessor(4096, 1, 1);
         source.connect(processor);
-        processor.connect(this.audioContext.destination);
+        //processor.connect(this.audioContext.destination);
 
         processor.onaudioprocess = (event) => {
             if (this.isRecording && this.websocket && this.websocket.readyState === WebSocket.OPEN) {
