@@ -4,7 +4,7 @@ class RealtimeVoiceAssistant {
         this.audioContext = null;
         this.isConnected = false;
         this.isRecording = false;
-        this.nextPlayTime = null;  // ✅ Added for audio queuing
+        this.audioQueue = [];
 
         this.startBtn = document.getElementById('startBtn');
         this.statusEl = document.getElementById('status');
@@ -35,7 +35,6 @@ class RealtimeVoiceAssistant {
 
             this.websocket.onopen = async () => {
                 this.isConnected = true;
-                this.nextPlayTime = null;  // ✅ Reset playback timeline
                 this.startBtn.textContent = "🛑 Stop Chat";
                 this.statusEl.textContent = "Connected! Setting up audio...";
                 await this.setupAudio();
@@ -74,9 +73,9 @@ class RealtimeVoiceAssistant {
                 }
             });
 
-            this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
-                sampleRate: 16000
-            });
+            this.audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+
+            console.log("Actual AudioContext sampleRate:", this.audioContext.sampleRate);
 
             const source = this.audioContext.createMediaStreamSource(stream);
 
@@ -159,7 +158,8 @@ class RealtimeVoiceAssistant {
                 this.appendToLastMessage(event.delta, "ai");
                 break;
             case 'response.audio.delta':
-                this.playAudioDelta(event.delta);
+                this.audioQueue.push(event.delta);
+                this.processAudioQueue();
                 break;
             case 'response.done':
                 this.statusEl.textContent = "🎤 Listening... (speak naturally)";
@@ -170,20 +170,26 @@ class RealtimeVoiceAssistant {
         }
     }
 
-    playAudioDelta(base64Audio) {
+    async processAudioQueue() {
+        if (this.playingAudio || !this.audioQueue.length) return;
+
+        const base64Audio = this.audioQueue.shift();
+        this.playingAudio = true;
         try {
             const binaryString = atob(base64Audio);
-            const bytes = new Uint8Array(binaryString.length);
+            const byteArray = new Uint8Array(binaryString.length);
             for (let i = 0; i < binaryString.length; i++) {
-                bytes[i] = binaryString.charCodeAt(i);
+                byteArray[i] = binaryString.charCodeAt(i);
             }
 
-            const pcm16 = new Int16Array(bytes.buffer);
+            const pcm16 = new Int16Array(byteArray.buffer);
             const float32 = new Float32Array(pcm16.length);
-
-            // ✅ Clip values between -1 and 1
             for (let i = 0; i < pcm16.length; i++) {
                 float32[i] = Math.max(-1, Math.min(1, pcm16[i] / 32768));
+            }
+
+            if (this.audioContext.state === 'suspended') {
+                await this.audioContext.resume();
             }
 
             const audioBuffer = this.audioContext.createBuffer(1, float32.length, 16000);
@@ -192,16 +198,16 @@ class RealtimeVoiceAssistant {
             const source = this.audioContext.createBufferSource();
             source.buffer = audioBuffer;
             source.connect(this.audioContext.destination);
+            source.start();
 
-            // ✅ Schedule with queue
-            if (!this.nextPlayTime || this.nextPlayTime < this.audioContext.currentTime) {
-                this.nextPlayTime = this.audioContext.currentTime;
-            }
-            source.start(this.nextPlayTime);
-            this.nextPlayTime += audioBuffer.duration;
+            source.onended = () => {
+                this.playingAudio = false;
+                this.processAudioQueue(); // play next
+            };
 
         } catch (error) {
             console.error('Audio playback error:', error);
+            this.playingAudio = false;
         }
     }
 
@@ -226,7 +232,6 @@ class RealtimeVoiceAssistant {
 
     disconnect() {
         this.isRecording = false;
-        this.nextPlayTime = null;  // ✅ Reset on disconnect
         if (this.websocket) {
             this.websocket.close();
         }
@@ -238,6 +243,8 @@ class RealtimeVoiceAssistant {
             this.audioContext.close();
             this.audioContext = null;
         }
+        this.playingAudio = false;
+        this.audioQueue = [];
     }
 }
 
@@ -245,6 +252,7 @@ class RealtimeVoiceAssistant {
 document.addEventListener('DOMContentLoaded', () => {
     new RealtimeVoiceAssistant();
 });
+
 
 
 
