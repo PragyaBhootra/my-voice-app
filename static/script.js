@@ -171,7 +171,7 @@ class RealtimeVoiceAssistant {
                 this.appendToLastMessage(event.delta, "ai");
                 break;
             case 'response.audio.delta':
-                this.bufferAndPlayPCM16(event.delta);
+                this.bufferAndPlayPCM16(event.delta).catch(console.error);
                 break;
             case 'response.done':
                 this.statusEl.textContent = "🎤 Listening... (speak naturally)";
@@ -271,6 +271,7 @@ class RealtimeVoiceAssistant {
 document.addEventListener('DOMContentLoaded', () => {
     new RealtimeVoiceAssistant();
 });
+
 
 
 
