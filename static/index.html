@@ -3,46 +3,35 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OpenAI Realtime Voice Chat</title>
-    <link rel="stylesheet" href="style.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+    <title>🎤 Realtime Voice Assistant</title>
+    <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
     <div class="container">
-        <div class="header">
-            <h1>🎤 AI Voice Chat</h1>
-            <p>Real-time conversation with OpenAI</p>
-        </div>
-        
-        <div class="controls">
-            <button id="startBtn" class="btn btn-primary">Start Conversation</button>
-            <button id="stopBtn" class="btn btn-danger" disabled>Stop Conversation</button>
-        </div>
-        
-        <div class="status">
-            <div id="status" class="status-text">Click "Start Conversation" to begin</div>
-        </div>
-        
-        <div class="controls">
-            <button id="recordBtn" class="btn btn-record" disabled>Hold to Speak</button>
-        </div>
-        
+        <header>
+            <h1>🎙️ Realtime AI Assistant</h1>
+            <p>Real-time conversation with GPT-4o</p>
+        </header>
+
         <div class="chat-container">
-            <div class="chat-section">
-                <h3>📝 Your Speech</h3>
-                <div id="transcription" class="chat-content"></div>
-            </div>
-            <div class="chat-section">
-                <h3>🤖 AI Response</h3>
-                <div id="response" class="chat-content"></div>
-            </div>
+            <div id="chatHistory" class="chat-history"></div>
+        </div>
+
+        <div class="controls">
+            <button id="startBtn" class="start-btn">
+                <span class="btn-text">🚀 Start Realtime Chat</span>
+            </button>
+            <div id="status" class="status">Click start to begin</div>
+        </div>
+
+        <div class="audio-controls">
+            <canvas id="audioVisualization" width="400" height="100"></canvas>
         </div>
     </div>
-    
-    <script src="script.js"></script>
+
+    <script src="/static/script.js"></script>
 </body>
 </html>
-
 
 
 
