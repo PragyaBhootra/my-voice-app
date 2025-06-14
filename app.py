@@ -93,7 +93,7 @@ async def websocket_endpoint(websocket: WebSocket):
             "session": {
                 "modalities": ["text", "audio"],
                 "instructions": "You are a helpful AI assistant. Keep responses conversational and concise.",
-                "voice": "alloy",
+                "voice": "shimmer",
                 "input_audio_format": "pcm16",
                 "output_audio_format": "pcm16",
                 "input_audio_transcription": {
