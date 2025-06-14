@@ -183,7 +183,7 @@ class RealtimeVoiceAssistant {
                  float32[i] = pcm16[i] / 32768;
             }
 
-            const audioBuffer = this.audioContext.createBuffer(1, float32.length, 16000);
+            const audioBuffer = this.audioContext.createBuffer(1, float32.length, 24000);
             audioBuffer.copyToChannel(float32, 0);
             
             const source = this.audioContext.createBufferSource();
