@@ -171,7 +171,7 @@ class RealtimeVoiceAssistant {
                 this.appendToLastMessage(event.delta, "ai");
                 break;
             case 'response.audio.delta':
-                this.bufferAndPlayPCM16(event.delta).catch(console.error);
+                this.bufferAndPlayPCM16(event.delta);
                 break;
             case 'response.done':
                 this.statusEl.textContent = "🎤 Listening... (speak naturally)";
@@ -182,7 +182,7 @@ class RealtimeVoiceAssistant {
         }
     }
 
-    async bufferAndPlayPCM16(base64Audio) {
+    bufferAndPlayPCM16(base64Audio) {
         const binaryString = atob(base64Audio);
         const bytes = new Uint8Array(binaryString.length);
         for (let i = 0; i < binaryString.length; i++) {
@@ -194,26 +194,10 @@ class RealtimeVoiceAssistant {
             float32[i] = Math.max(-1.0, Math.min(pcm16[i] / 32768, 1.0));
         }
         // Use the audio context's sample rate for playback
-        const sampleRate = 16000;
-        const targetSampleRate = this.audioContext.sampleRate;
-        console.log(`PCM sampleRate: ${sampleRate}, AudioContext sampleRate: ${targetSampleRate}`);
-        //const audioBuffer = this.audioContext.createBuffer(1, float32.length, sampleRate);
-        if (sampleRate !== targetSampleRate) {
-            const tempCtx = new OfflineAudioContext(1, float32.length * targetSampleRate / sampleRate, targetSampleRate);
-            const buffer = tempCtx.createBuffer(1, float32.length, sampleRate);
-            buffer.copyToChannel(float32, 0);
-
-            const source = tempCtx.createBufferSource();
-            source.buffer = buffer;
-            source.connect(tempCtx.destination);
-            source.start(0);
-            const resampledBuffer = await tempCtx.startRendering()
-            this.audioQueue.push(resampledBuffer);
-        }else {
-            const audioBuffer = this.audioContext.createBuffer(1, float32.length, sampleRate);
-            audioBuffer.copyToChannel(float32, 0);
-            this.audioQueue.push(audioBuffer);
-        }
+        const sampleRate = (this.audioContext.sampleRate || 16000) / 2;
+        const audioBuffer = this.audioContext.createBuffer(1, float32.length, sampleRate);
+        audioBuffer.copyToChannel(float32, 0);
+        this.audioQueue.push(audioBuffer);
         if (!this.isPlaying) this.playAudioQueue();
     }
 
@@ -271,6 +255,7 @@ class RealtimeVoiceAssistant {
 document.addEventListener('DOMContentLoaded', () => {
     new RealtimeVoiceAssistant();
 });
+
 
 
 
