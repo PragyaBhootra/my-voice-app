@@ -13,6 +13,10 @@ class RealtimeVoiceAssistant {
         this.canvas = document.getElementById('audioVisualization');
         this.canvasCtx = this.canvas.getContext('2d');
 
+        this.silenceTimer = null;
+        this.silenceThreshold = 0.01; // volume threshold
+        this.silenceDelay = 1000; // ms of silence before sending audio_end
+
         this.initializeEventListeners();
     }
 
@@ -56,7 +60,6 @@ class RealtimeVoiceAssistant {
                 console.error('WebSocket error:', error);
                 this.statusEl.textContent = "Connection error";
             };
-
         } catch (error) {
             console.error('Connection failed:', error);
             this.statusEl.textContent = "Failed to connect";
@@ -74,7 +77,6 @@ class RealtimeVoiceAssistant {
             });
 
             this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-
             const source = this.audioContext.createMediaStreamSource(stream);
 
             await this.audioContext.audioWorklet.addModule(URL.createObjectURL(new Blob([`
@@ -98,23 +100,43 @@ class RealtimeVoiceAssistant {
 
             const pcmNode = new AudioWorkletNode(this.audioContext, 'pcm-processor');
             pcmNode.port.onmessage = (event) => {
-                const int16Buffer = event.data;
-                const byteArray = new Uint8Array(int16Buffer);
+                const int16Buffer = new Int16Array(event.data);
+                const byteArray = new Uint8Array(event.data);
                 const binary = String.fromCharCode(...byteArray);
                 const base64Audio = btoa(binary);
 
+                // Send to backend
                 if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
                     this.websocket.send(JSON.stringify({
                         type: "audio_data",
                         audio: base64Audio
                     }));
                 }
+
+                // Silence detection
+                let sumSquares = 0;
+                for (let i = 0; i < int16Buffer.length; i++) {
+                    sumSquares += int16Buffer[i] * int16Buffer[i];
+                }
+                const rms = Math.sqrt(sumSquares / int16Buffer.length) / 32768;
+
+                if (rms < this.silenceThreshold) {
+                    if (!this.silenceTimer) {
+                        this.silenceTimer = setTimeout(() => {
+                            this.websocket.send(JSON.stringify({ type: "audio_end" }));
+                            this.silenceTimer = null;
+                        }, this.silenceDelay);
+                    }
+                } else {
+                    if (this.silenceTimer) {
+                        clearTimeout(this.silenceTimer);
+                        this.silenceTimer = null;
+                    }
+                }
             };
 
-            // Only connect the source to the PCM processor (no direct output to speakers)
             source.connect(pcmNode);
 
-            // Visualization
             const analyser = this.audioContext.createAnalyser();
             analyser.fftSize = 2048;
             source.connect(analyser);
@@ -193,7 +215,7 @@ class RealtimeVoiceAssistant {
         for (let i = 0; i < pcm16.length; i++) {
             float32[i] = Math.max(-1.0, Math.min(pcm16[i] / 32768, 1.0));
         }
-        // Use the audio context's sample rate for playback
+
         const sampleRate = (this.audioContext.sampleRate || 16000) / 2;
         const audioBuffer = this.audioContext.createBuffer(1, float32.length, sampleRate);
         audioBuffer.copyToChannel(float32, 0);
@@ -255,6 +277,7 @@ class RealtimeVoiceAssistant {
 document.addEventListener('DOMContentLoaded', () => {
     new RealtimeVoiceAssistant();
 });
+
 
 
 
