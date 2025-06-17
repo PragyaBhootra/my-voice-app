@@ -6,7 +6,6 @@ class RealtimeVoiceAssistant {
         this.isRecording = false;
         this.audioQueue = [];
         this.isPlaying = false;
-        this.isResponseActive = false;
 
         this.startBtn = document.getElementById('startBtn');
         this.statusEl = document.getElementById('status');
@@ -75,13 +74,14 @@ class RealtimeVoiceAssistant {
             });
 
             this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
             const source = this.audioContext.createMediaStreamSource(stream);
 
             await this.audioContext.audioWorklet.addModule(URL.createObjectURL(new Blob([`
                 class PCMProcessor extends AudioWorkletProcessor {
                     process(inputs) {
                         const input = inputs[0];
-                        if (input.length > 0 && input[0].length > 0) {
+                        if (input.length > 0) {
                             const channel = input[0];
                             const int16 = new Int16Array(channel.length);
                             for (let i = 0; i < channel.length; i++) {
@@ -99,26 +99,22 @@ class RealtimeVoiceAssistant {
             const pcmNode = new AudioWorkletNode(this.audioContext, 'pcm-processor');
             pcmNode.port.onmessage = (event) => {
                 const int16Buffer = event.data;
-                if (int16Buffer.byteLength < 320) return; // less than ~10ms @16kHz
-
                 const byteArray = new Uint8Array(int16Buffer);
                 const binary = String.fromCharCode(...byteArray);
                 const base64Audio = btoa(binary);
 
-                if (this.websocket &&
-                    this.websocket.readyState === WebSocket.OPEN &&
-                    !this.isResponseActive) {
-
+                if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
                     this.websocket.send(JSON.stringify({
                         type: "audio_data",
                         audio: base64Audio
                     }));
-                    this.isResponseActive = true;
                 }
             };
 
+            // Only connect the source to the PCM processor (no direct output to speakers)
             source.connect(pcmNode);
 
+            // Visualization
             const analyser = this.audioContext.createAnalyser();
             analyser.fftSize = 2048;
             source.connect(analyser);
@@ -179,11 +175,9 @@ class RealtimeVoiceAssistant {
                 break;
             case 'response.done':
                 this.statusEl.textContent = "🎤 Listening... (speak naturally)";
-                this.isResponseActive = false;
                 break;
             case 'error':
                 this.addMessage(`Error: ${event.error.message}`, "error");
-                this.isResponseActive = false;
                 break;
         }
     }
@@ -199,7 +193,8 @@ class RealtimeVoiceAssistant {
         for (let i = 0; i < pcm16.length; i++) {
             float32[i] = Math.max(-1.0, Math.min(pcm16[i] / 32768, 1.0));
         }
-        const sampleRate = this.audioContext.sampleRate / 2;
+        // Use the audio context's sample rate for playback
+        const sampleRate = (this.audioContext.sampleRate || 16000) / 2;
         const audioBuffer = this.audioContext.createBuffer(1, float32.length, sampleRate);
         audioBuffer.copyToChannel(float32, 0);
         this.audioQueue.push(audioBuffer);
@@ -254,7 +249,6 @@ class RealtimeVoiceAssistant {
         }
         this.audioQueue = [];
         this.isPlaying = false;
-        this.isResponseActive = false;
     }
 }
 
