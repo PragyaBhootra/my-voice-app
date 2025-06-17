@@ -34,7 +34,7 @@ class RealtimeClient:
     def __init__(self, api_key: str):
         self.api_key = api_key
         self.websocket = None
-        self.url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17"
+        self.url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-0"
         self.headers = {
             "Authorization": f"Bearer {api_key}",
             "OpenAI-Beta": "realtime=v1"
