@@ -34,7 +34,7 @@ class RealtimeClient:
     def __init__(self, api_key: str):
         self.api_key = api_key
         self.websocket = None
-        self.url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01"
+        self.url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17"
         self.headers = {
             "Authorization": f"Bearer {api_key}",
             "OpenAI-Beta": "realtime=v1"
@@ -101,7 +101,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 },
                 "turn_detection": {
                     "type": "server_vad",
-                    "threshold": 0.6,
+                    "threshold": 0.7,
                     "prefix_padding_ms": 300,
                     "silence_duration_ms": 500
                 }
